@@ -36,7 +36,26 @@ export async function processBotMessage(
   });
 
   if (!botConfig || !botConfig.isActive) {
-    return { reply: 'ขอโทษค่ะ กรุณาติดต่อเจ้าหน้าที่', shouldHandoff: true };
+    try {
+      const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
+        { role: 'system', content: 'คุณเป็นผู้ช่วยบริการลูกค้า ตอบภาษาไทย สั้น กระชับ เป็นมิตร ไม่เกิน 2 ประโยค' },
+        ...conversationHistory.slice(-4),
+        { role: 'user', content: userMessage },
+      ];
+      const defaultReply = await generateAIResponse(messages, LIGHT_MODEL, 0.7, 150);
+      const shouldHandoff = defaultReply.includes('HANDOFF_REQUESTED') ||
+        userMessage.includes('เจ้าหน้าที่') ||
+        userMessage.includes('คนจริงๆ') ||
+        userMessage.includes('ขอคุยกับคน') ||
+        userMessage.includes('admin') ||
+        userMessage.includes('แอดมิน');
+      return {
+        reply: defaultReply || 'ขออภัยค่ะ มีข้อขัดข้องชั่วคราว กรุณาติดต่อแอดมินนะคะ',
+        shouldHandoff,
+      };
+    } catch (err) {
+      return { reply: 'ขอโทษค่ะ กรุณาติดต่อเจ้าหน้าที่', shouldHandoff: true };
+    }
   }
 
   // ★ เอาเฉพาะ KB ที่เกี่ยวข้องกับคำถาม (ไม่ส่งทั้งหมด)

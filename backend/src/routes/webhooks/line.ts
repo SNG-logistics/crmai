@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../../lib/prisma';
-import { verifyLineSignature, parseLineEvent, getLineProfile, sendLineReply, lineTextMessage } from '../../services/line.service';
+import { verifyLineSignature, parseLineEvent, getLineProfile, sendLineReply, sendLinePush, lineTextMessage } from '../../services/line.service';
 import { processBotMessage } from '../../services/ai.service';
 import { emitToTenant } from '../../lib/socket';
 
@@ -132,30 +132,83 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
   // Emit real-time
   emitToTenant(tenantId, 'new_message', { conversationId: conversation.id, message: { ...message, senderType: 'customer' }, contact, channel: 'line' });
 
-  // AI bot reply
-  if (conversation.isBot && normalized.messageType === 'text' && normalized.replyToken) {
+  // ─── AI bot reply ────────────────────────────────────────────────────────
+  // ตอบได้ทั้งในโหมด bot และเมื่อ isBot = true
+  if (conversation.isBot && normalized.messageType === 'text') {
     try {
-      const history = await prisma.message.findMany({ where: { conversationId: conversation.id }, orderBy: { createdAt: 'asc' }, take: 20 });
+      const history = await prisma.message.findMany({
+        where: { conversationId: conversation.id },
+        orderBy: { createdAt: 'asc' },
+        take: 20,
+      });
       const conversationHistory = history.map((m: any) => ({
         role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const,
         content: m.content,
       }));
 
       const { reply, shouldHandoff } = await processBotMessage(tenantId, conversationHistory, normalized.content);
-      await sendLineReply(normalized.replyToken, [lineTextMessage(reply)], accessToken);
+      console.log(`[LINE Bot] tenant=${tenantId} reply="${reply.substring(0, 60)}" handoff=${shouldHandoff}`);
 
-      const botReply = await prisma.message.create({
-        data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: reply },
-      });
+      let sent = false;
 
-      emitToTenant(tenantId, 'new_message', { conversationId: conversation.id, message: { ...botReply, senderType: 'bot' }, contact, channel: 'line' });
-
-      if (shouldHandoff) {
-        await prisma.conversation.update({ where: { id: conversation.id }, data: { isBot: false, status: 'pending' } });
-        emitToTenant(tenantId, 'conversation_updated', { conversationId: conversation.id, status: 'pending', isBot: false });
+      // ── ลอง Reply API (ใช้ replyToken) ───────────────────────────────────
+      if (normalized.replyToken) {
+        try {
+          await sendLineReply(normalized.replyToken, [lineTextMessage(reply)], accessToken);
+          sent = true;
+          console.log(`[LINE Bot] ✅ Reply sent via replyToken`);
+        } catch (replyErr: any) {
+          // replyToken หมดอายุ (>30s) หรือใช้แล้ว → fallback Push
+          console.warn(`[LINE Bot] ⚠️ Reply API failed (${replyErr?.response?.data?.message||replyErr.message}), trying Push...`);
+        }
       }
-    } catch (aiError) {
-      console.error('LINE AI error:', aiError);
+
+      // ── Fallback: Push API (ถ้า replyToken ไม่มี หรือหมดอายุ) ─────────────
+      if (!sent) {
+        try {
+          await sendLinePush(userId, [lineTextMessage(reply)], accessToken);
+          sent = true;
+          console.log(`[LINE Bot] ✅ Reply sent via Push API`);
+        } catch (pushErr: any) {
+          console.error(`[LINE Bot] ❌ Push API also failed:`, pushErr?.response?.data || pushErr.message);
+        }
+      }
+
+      // ── บันทึก bot message ลง DB ──────────────────────────────────────────
+      if (sent) {
+        const botReply = await prisma.message.create({
+          data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: reply },
+        });
+        emitToTenant(tenantId, 'new_message', {
+          conversationId: conversation.id,
+          message: { ...botReply, senderType: 'bot' },
+          contact, channel: 'line',
+        });
+      }
+
+      // ── Handoff ───────────────────────────────────────────────────────────
+      if (shouldHandoff) {
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { isBot: false, status: 'pending' },
+        });
+        emitToTenant(tenantId, 'conversation_updated', {
+          conversationId: conversation.id, status: 'pending', isBot: false,
+        });
+        console.log(`[LINE Bot] 🔄 Handoff to agent conversation=${conversation.id}`);
+      }
+
+    } catch (aiError: any) {
+      console.error('[LINE Bot] ❌ AI error:', aiError?.message || aiError);
+      // ส่งข้อความ fallback ให้ลูกค้าเลย
+      try {
+        const fallback = 'ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณารอสักครู่ 🙏';
+        if (normalized.replyToken) {
+          await sendLineReply(normalized.replyToken, [lineTextMessage(fallback)], accessToken);
+        } else {
+          await sendLinePush(userId, [lineTextMessage(fallback)], accessToken);
+        }
+      } catch {}
     }
   }
 }

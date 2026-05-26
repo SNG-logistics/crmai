@@ -88,39 +88,55 @@ router.post('/:tenantId', async (req: Request, res: Response) => {
       channel: 'telegram',
     });
 
-    // AI bot processing
+    // ─── AI bot processing ────────────────────────────────────────────────
     if (conversation.isBot && normalized.messageType === 'text') {
-      const history = await prisma.message.findMany({
-        where: { conversationId: conversation.id },
-        orderBy: { createdAt: 'asc' },
-        take: 20,
-      });
-      const conversationHistory = history.map((m: any) => ({
-        role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const,
-        content: m.content,
-      }));
+      try {
+        const history = await prisma.message.findMany({
+          where: { conversationId: conversation.id },
+          orderBy: { createdAt: 'asc' },
+          take: 20,
+        });
+        const conversationHistory = history.map((m: any) => ({
+          role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const,
+          content: m.content,
+        }));
 
-      const { reply, shouldHandoff } = await processBotMessage(tenantId, conversationHistory, normalized.content);
-      await sendTelegramMessage(chatId, reply, botToken);
+        const { reply, shouldHandoff } = await processBotMessage(tenantId, conversationHistory, normalized.content);
+        console.log(`[TG Bot] tenant=${tenantId} reply="${reply.substring(0,60)}" handoff=${shouldHandoff}`);
 
-      const botReply = await prisma.message.create({
-        data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: reply },
-      });
+        await sendTelegramMessage(chatId, reply, botToken);
+        console.log(`[TG Bot] ✅ Reply sent to chatId=${chatId}`);
 
-      emitToTenant(tenantId, 'new_message', {
-        conversationId: conversation.id,
-        message: { ...botReply, senderType: 'bot' },
-        contact,
-        channel: 'telegram',
-      });
+        const botReply = await prisma.message.create({
+          data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: reply },
+        });
 
-      if (shouldHandoff) {
-        await prisma.conversation.update({ where: { id: conversation.id }, data: { isBot: false, status: 'pending' } });
-        emitToTenant(tenantId, 'conversation_updated', { conversationId: conversation.id, status: 'pending', isBot: false });
+        emitToTenant(tenantId, 'new_message', {
+          conversationId: conversation.id,
+          message: { ...botReply, senderType: 'bot' },
+          contact, channel: 'telegram',
+        });
+
+        if (shouldHandoff) {
+          await prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { isBot: false, status: 'pending' },
+          });
+          emitToTenant(tenantId, 'conversation_updated', {
+            conversationId: conversation.id, status: 'pending', isBot: false,
+          });
+          console.log(`[TG Bot] 🔄 Handoff to agent`);
+        }
+      } catch (aiError: any) {
+        console.error('[TG Bot] ❌ AI error:', aiError?.message || aiError);
+        // Fallback message ถึงลูกค้า
+        try {
+          await sendTelegramMessage(chatId, 'ขออภัยค่ะ ระบบขัดข้องชั่วคราว กรุณารอสักครู่ 🙏', botToken);
+        } catch {}
       }
     }
-  } catch (err) {
-    console.error('Telegram webhook error:', err);
+  } catch (err: any) {
+    console.error('Telegram webhook error:', err?.message || err);
   }
 });
 
