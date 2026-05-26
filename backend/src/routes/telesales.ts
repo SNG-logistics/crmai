@@ -272,4 +272,74 @@ router.put('/targets', async (req: Request, res: Response) => {
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/telesales/dashboard — รวม KPI + performance summary สำหรับหน้าหลัก
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/dashboard', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.tenantId!;
+    const period = (req.query.period as string) || new Date().toISOString().slice(0, 7);
+    const [year, month] = period.split('-').map(Number);
+    const dateFrom = new Date(year, month - 1, 1);
+    const dateTo   = new Date(year, month, 0, 23, 59, 59);
+    const today    = new Date(); today.setHours(0, 0, 0, 0);
+
+    const [totalCalls, answeredCalls, depositedCalls, newContacts, noDepositCount, agents] = await Promise.all([
+      prisma.callLog.count({ where: { tenantId, calledAt: { gte: dateFrom, lte: dateTo } } }),
+      prisma.callLog.count({ where: { tenantId, status: 'answered', calledAt: { gte: dateFrom, lte: dateTo } } }),
+      prisma.callLog.count({ where: { tenantId, depositedAfter: true, calledAt: { gte: dateFrom, lte: dateTo } } }),
+      prisma.contact.count({ where: { tenantId, createdAt: { gte: today } } }),
+      prisma.contact.count({ where: { tenantId, totalDeposit: 0 } }),
+      prisma.user.count({ where: { tenantId, role: { in: ['agent', 'supervisor'] }, isActive: true } }),
+    ]);
+
+    const callsToday = await prisma.callLog.count({ where: { tenantId, calledAt: { gte: today } } });
+
+    res.json({
+      success: true,
+      dashboard: {
+        period,
+        totalCalls, answeredCalls, depositedCalls,
+        callRate: totalCalls > 0 ? (answeredCalls / totalCalls) : 0,
+        depositRate: answeredCalls > 0 ? (depositedCalls / answeredCalls) : 0,
+        newContacts, noDepositCount, agents, callsToday,
+      },
+    });
+  } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/telesales/call-logs — ดู call log ทั้งหมด (paginated)
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/call-logs', async (req: Request, res: Response) => {
+  try {
+    const { page = '1', limit = '25', agentId, status, from, to } = req.query;
+    const tenantId = req.tenantId!;
+    const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
+
+    const where: any = { tenantId };
+    if (agentId) where.agentId = agentId;
+    if (status)  where.status  = status;
+    if (from || to) {
+      where.calledAt = {};
+      if (from) where.calledAt.gte = new Date(from as string);
+      if (to)   where.calledAt.lte = new Date(new Date(to as string).setHours(23, 59, 59));
+    }
+
+    const [logs, total] = await Promise.all([
+      prisma.callLog.findMany({
+        where, skip, take: parseInt(limit as string),
+        include: {
+          contact: { select: { id: true, displayName: true, phone: true, username: true } },
+          agent:   { select: { id: true, displayName: true } },
+        },
+        orderBy: { calledAt: 'desc' },
+      }),
+      prisma.callLog.count({ where }),
+    ]);
+
+    res.json({ success: true, logs, total, page: parseInt(page as string) });
+  } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 export default router;

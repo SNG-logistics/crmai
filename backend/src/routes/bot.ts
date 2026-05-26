@@ -24,6 +24,19 @@ router.put('/', async (req: Request, res: Response) => {
   } catch { res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' }); }
 });
 
+// GET /api/bot/knowledge — list all knowledge base items
+router.get('/knowledge', async (req: Request, res: Response) => {
+  try {
+    const bot = await prisma.botConfig.findUnique({ where: { tenantId: req.tenantId } });
+    if (!bot) return res.json({ success: true, items: [] });
+    const items = await prisma.knowledgeBase.findMany({
+      where: { botConfigId: bot.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ success: true, items });
+  } catch { res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' }); }
+});
+
 router.post('/knowledge', async (req: Request, res: Response) => {
   try {
     const bot = await prisma.botConfig.findUnique({ where: { tenantId: req.tenantId } });

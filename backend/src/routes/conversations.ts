@@ -42,6 +42,28 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+/** GET /api/conversations/stats — สรุปสถิติ Inbox */
+router.get('/stats', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.tenantId!;
+    const now = new Date();
+    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+
+    const [open, bot, pending, resolved, resolvedToday, newToday, unread, byChannel] = await Promise.all([
+      prisma.conversation.count({ where: { tenantId, status: 'open' } }),
+      prisma.conversation.count({ where: { tenantId, status: 'bot' } }),
+      prisma.conversation.count({ where: { tenantId, status: 'pending' } }),
+      prisma.conversation.count({ where: { tenantId, status: 'resolved' } }),
+      prisma.conversation.count({ where: { tenantId, status: 'resolved', resolvedAt: { gte: todayStart } } }),
+      prisma.conversation.count({ where: { tenantId, createdAt: { gte: todayStart } } }),
+      prisma.message.count({ where: { tenantId, isRead: false, senderType: 'customer' } }),
+      prisma.conversation.groupBy({ by: ['channel'], where: { tenantId }, _count: true }),
+    ]);
+
+    res.json({ success: true, stats: { open, bot, pending, resolved, resolvedToday, newToday, unread, byChannel } });
+  } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
+});
+
 /** GET /api/conversations/:id */
 router.get('/:id', async (req: Request, res: Response) => {
   try {
