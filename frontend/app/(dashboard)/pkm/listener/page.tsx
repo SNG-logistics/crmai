@@ -28,7 +28,6 @@ export default function PKMListenerPage() {
   const [rawLog, setRawLog]   = useState<PkmEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [tab, setTab]         = useState<'live' | 'raw'>('live');
-  const socket = useSocket();
 
   const loadStatus = useCallback(async () => {
     try {
@@ -45,33 +44,20 @@ export default function PKMListenerPage() {
   }, [loadStatus]);
 
   // ─── Real-time Socket events ────────────────────────────────────────────────
-  useEffect(() => {
-    if (!socket) return;
+  useSocket('pkm:transaction', (data: TxEvent) => {
+    setTxLog(prev => [data, ...prev].slice(0, 100));
+    const isW = data.type === 'withdraw';
+    const msg = `${isW ? '💸 ถอน' : '💰 ฝาก'} ${data.contactName || data.username || 'Unknown'} ฿${(data.amount || 0).toLocaleString()}`;
+    toast[isW ? 'error' : 'success'](msg, { duration: 5000 });
+  });
 
-    const onTx = (data: TxEvent) => {
-      setTxLog(prev => [data, ...prev].slice(0, 100));
-      const isW = data.type === 'withdraw';
-      const msg = `${isW ? '💸 ถอน' : '💰 ฝาก'} ${data.contactName || data.username || 'Unknown'} ฿${(data.amount || 0).toLocaleString()}`;
-      toast[isW ? 'error' : 'success'](msg, { duration: 5000 });
-    };
+  useSocket('pkm:raw_event', (data: any) => {
+    setRawLog(prev => [{ event: data.event, data: data.data, ts: data.ts }, ...prev].slice(0, 50));
+  });
 
-    const onRaw = (data: any) => {
-      setRawLog(prev => [{ event: data.event, data: data.data, ts: data.ts }, ...prev].slice(0, 50));
-    };
-
-    const onUnknown = (data: any) => {
-      toast(`⚠️ Unknown member ${data.type} ฿${data.amount} (${data.pf})`, { icon: '🔔', duration: 4000 });
-    };
-
-    socket.on('pkm:transaction',    onTx);
-    socket.on('pkm:raw_event',      onRaw);
-    socket.on('pkm:unknown_member', onUnknown);
-    return () => {
-      socket.off('pkm:transaction',    onTx);
-      socket.off('pkm:raw_event',      onRaw);
-      socket.off('pkm:unknown_member', onUnknown);
-    };
-  }, [socket]);
+  useSocket('pkm:unknown_member', (data: any) => {
+    toast(`⚠️ Unknown member ${data.type} ฿${data.amount} (${data.pf})`, { icon: '🔔', duration: 4000 });
+  });
 
   const doStart = async () => {
     setLoading(true);

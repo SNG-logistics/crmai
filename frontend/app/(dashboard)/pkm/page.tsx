@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import toast from 'react-hot-toast';
-import api from '../../../../lib/api';
+import api from '../../../lib/api';
 
 // ─── ฟอร์ม import สมาชิก 1 คน ────────────────────────────────────────────────
 const EMPTY = {
