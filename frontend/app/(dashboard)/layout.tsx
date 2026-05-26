@@ -20,6 +20,7 @@ const NAV_KEYS = [
   { href: '/analytics',        icon: '📊', key: 'nav_analytics'  },
   { href: '/live',             icon: '🔴', key: 'nav_live'       },
   { href: '/flex',             icon: '✉️', key: 'nav_flex'       },
+  { href: '/pkm',             icon: '🎰', key: 'nav_pkm'        },
   { href: '/settings/import',  icon: '📥', key: 'nav_import'     },
   { href: '/settings/sms',     icon: '📱', key: 'nav_sms'        },
   { href: '/settings/whatsapp',icon: '💚', key: 'nav_whatsapp'   },

@@ -14,6 +14,7 @@ export const translations = {
   nav_telesales:       { th: 'Telesales',            lo: 'ທີມໂທຂາຍ' },
   nav_live:            { th: 'Live Dashboard',       lo: 'ໄລທ໌ດ໋າດ' },
   nav_flex:            { th: 'FLEX Builder',         lo: 'FLEX Builder' },
+  nav_pkm:             { th: '🎰 PKM สมาชิก',          lo: '🎰 PKM ສະມາຊິກ' },
   nav_import:          { th: 'Import ข้อมูล',        lo: 'ນຳເຂົ້າຂໍ້ມູນ' },
   nav_sms:             { th: 'SMS Gateway',          lo: 'ສົ່ງ SMS' },
   nav_whatsapp:        { th: 'WhatsApp',             lo: 'WhatsApp' },

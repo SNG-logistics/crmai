@@ -26,6 +26,7 @@ import smsRoutes  from './routes/sms';
 import liveRoutes from './routes/live';
 import flexRoutes from './routes/flex';
 import whatsappRoutes from './routes/whatsapp';
+import pkmRoutes from './routes/pkm';
 import { initWhatsAppSessions } from './services/whatsapp.service';
 import lineWebhookRoutes from './routes/webhooks/line';
 
@@ -112,6 +113,7 @@ app.use('/api/sms',       smsRoutes);
 app.use('/api/live',      liveRoutes);
 app.use('/api/flex',       flexRoutes);
 app.use('/api/whatsapp',   whatsappRoutes);
+app.use('/api/pkm',        pkmRoutes);
 
 
 
