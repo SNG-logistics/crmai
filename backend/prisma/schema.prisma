@@ -1,0 +1,457 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================
+// Multi-Tenant Core
+// =============================================
+
+model Tenant {
+  id        String  @id @default(cuid())
+  name      String
+  slug      String  @unique // subdomain/identifier
+  logo      String?
+  plan      String  @default("starter") // starter, pro, enterprise
+  isActive  Boolean @default(true)
+  settings  String  @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users           User[]
+  contacts        Contact[]
+  conversations   Conversation[]
+  tickets         Ticket[]
+  tags            Tag[]
+  bots            BotConfig[]
+  broadcasts      Broadcast[]
+  automations     AutomationRule[]
+  channels        ChannelConfig[]
+  callLogs        CallLog[]
+  tsTargets       TelesalesTarget[]
+  financials      FinancialRecord[]
+  partners        Partner[]
+  smsLogs         SmsLog[]
+  flexTemplates   FlexTemplate[]
+}
+
+// =============================================
+// Users (Agents/Admins per Tenant)
+// =============================================
+
+model User {
+  id               String    @id @default(cuid())
+  tenantId         String
+  tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  email            String
+  username         String
+  passwordHash     String
+  displayName      String
+  avatar           String?
+  role             String    @default("agent") // superadmin, admin, supervisor, agent, bot_manager, analyst
+  isActive         Boolean   @default(true)
+  twoFactorSecret  String?
+  twoFactorEnabled Boolean   @default(false)
+  lastLoginAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  assignedConversations Conversation[]    @relation("AssignedAgent")
+  messages              Message[]
+  tickets               Ticket[]          @relation("AssignedTickets")
+  callLogs              CallLog[]         @relation("AgentCallLogs")
+  telesalesTargets      TelesalesTarget[]
+
+  @@unique([tenantId, email])
+  @@unique([tenantId, username])
+}
+
+// =============================================
+// Channel Configuration per Tenant
+// =============================================
+
+model ChannelConfig {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  channel   String   // line, telegram, webchat
+  isActive  Boolean  @default(true)
+  config    String   // channel-specific config (tokens, secrets etc)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, channel])
+}
+
+// =============================================
+// Contacts (Customers) — เพิ่ม Telesales fields
+// =============================================
+
+model Contact {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  displayName   String
+  firstName     String?
+  lastName      String?
+  email         String?
+  phone         String?
+  avatar        String?
+  lineUserId    String?
+  telegramId    String?
+  webchatId     String?
+  tags          ContactTag[]
+  customFields  String   @default("{}")
+  leadScore     Int      @default(0)
+  isBlocked     Boolean  @default(false)
+  notes         String?
+
+  // ─── Telesales / Gaming fields ───────────────
+  username        String?  // ยูเซอร์เนมในระบบเกม
+  affiliateCode   String?  // รหัสพาร์ทเนอร์
+  memberType      String   @default("new") // new, regular, vip, churned
+  tsStatus        String   @default("pending") // pending, calling, answered, no_answer, done
+  tsAssignedToId  String?  // agent ที่รับผิดชอบ Telesales
+  registeredAt    DateTime?
+  firstDepositAt  DateTime?
+  lastDepositAt   DateTime?
+  totalDeposit    Float    @default(0)
+  totalWithdraw   Float    @default(0)
+  totalProfit     Float    @default(0)
+  depositCount    Int      @default(0)
+  withdrawCount   Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversations  Conversation[]
+  tickets        Ticket[]
+  callLogs       CallLog[]
+  financials     FinancialRecord[]
+
+  @@unique([tenantId, lineUserId])
+  @@unique([tenantId, telegramId])
+}
+
+// =============================================
+// Conversations (Chat Sessions)
+// =============================================
+
+model Conversation {
+  id            String    @id @default(cuid())
+  tenantId      String
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contactId     String
+  contact       Contact   @relation(fields: [contactId], references: [id])
+  channel       String    // line, telegram, webchat
+  channelId     String    // platform-specific conversation/user ID
+  status        String    @default("open") // open, bot, pending, resolved, closed
+  assignedToId  String?
+  assignedTo    User?     @relation("AssignedAgent", fields: [assignedToId], references: [id])
+  isBot         Boolean   @default(true)
+  priority      String    @default("normal") // low, normal, high, urgent
+  lastMessageAt DateTime?
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  messages Message[]
+  ticket   Ticket?
+
+  @@unique([tenantId, channel, channelId])
+}
+
+// =============================================
+// Messages
+// =============================================
+
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tenantId       String
+  senderId       String?
+  sender         User?        @relation(fields: [senderId], references: [id])
+  senderType     String       // customer, agent, bot
+  type           String       @default("text")
+  content        String
+  metadata       String       @default("{}")
+  isRead         Boolean      @default(false)
+  platformMsgId  String?
+  createdAt      DateTime     @default(now())
+}
+
+// =============================================
+// Tickets (Support Tickets)
+// =============================================
+
+model Ticket {
+  id             String        @id @default(cuid())
+  tenantId       String
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId String?       @unique
+  conversation   Conversation? @relation(fields: [conversationId], references: [id])
+  contactId      String
+  contact        Contact       @relation(fields: [contactId], references: [id])
+  assignedToId   String?
+  assignedTo     User?         @relation("AssignedTickets", fields: [assignedToId], references: [id])
+  title          String
+  description    String?
+  status         String        @default("open")
+  priority       String        @default("medium")
+  slaDeadline    DateTime?
+  resolvedAt     DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+// =============================================
+// Tags
+// =============================================
+
+model Tag {
+  id       String     @id @default(cuid())
+  tenantId String
+  tenant   Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name     String
+  color    String     @default("#00D4AA")
+  contacts ContactTag[]
+
+  @@unique([tenantId, name])
+}
+
+model ContactTag {
+  contactId String
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tagId     String
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+}
+
+// =============================================
+// AI Bot Configuration per Tenant
+// =============================================
+
+model BotConfig {
+  id            String          @id @default(cuid())
+  tenantId      String
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name          String
+  isActive      Boolean         @default(true)
+  systemPrompt  String          @default("You are a helpful customer service assistant.")
+  model         String          @default("gpt-4o")
+  temperature   Float           @default(0.7)
+  knowledgeBase KnowledgeBase[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([tenantId])
+}
+
+// =============================================
+// Knowledge Base for AI
+// =============================================
+
+model KnowledgeBase {
+  id          String    @id @default(cuid())
+  botConfigId String
+  botConfig   BotConfig @relation(fields: [botConfigId], references: [id], onDelete: Cascade)
+  question    String
+  answer      String
+  category    String    @default("general")
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// =============================================
+// Broadcasts (Bulk Messaging)
+// =============================================
+
+model Broadcast {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  channels    String    @default("[]")
+  message     String
+  messageType String    @default("text")
+  metadata    String    @default("{}")
+  targetTags  String    @default("[]")
+  status      String    @default("draft")
+  scheduledAt DateTime?
+  sentAt      DateTime?
+  sentCount   Int       @default(0)
+  failedCount Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// =============================================
+// Automation Rules
+// =============================================
+
+model AutomationRule {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name       String
+  isActive   Boolean  @default(true)
+  trigger    String
+  conditions String   @default("[]")
+  actions    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// =============================================
+// ★ NEW: CallLog — บันทึกการโทร Telesales
+// =============================================
+
+model CallLog {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contactId      String
+  contact        Contact  @relation(fields: [contactId], references: [id])
+  agentId        String
+  agent          User     @relation("AgentCallLogs", fields: [agentId], references: [id])
+  status         String   // answered | no_answer | busy | callback | done
+  duration       Int?     // วินาที
+  notes          String?
+  depositedAfter Boolean  @default(false)
+  depositAmount  Float?
+  scheduledAt    DateTime?
+  calledAt       DateTime @default(now())
+}
+
+// =============================================
+// ★ NEW: TelesalesTarget — เป้าหมายราย Agent/เดือน
+// =============================================
+
+model TelesalesTarget {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  agentId             String
+  agent               User     @relation(fields: [agentId], references: [id])
+  period              String   // "2026-05"
+  callTarget          Int      @default(100)
+  answerRateTarget    Float    @default(0.6)
+  depositRateTarget   Float    @default(0.3)
+  depositAmountTarget Float    @default(50000)
+  profitTarget        Float    @default(20000)
+
+  @@unique([tenantId, agentId, period])
+}
+
+// =============================================
+// ★ NEW: FinancialRecord — ข้อมูลการเงินรายวัน
+// =============================================
+
+model FinancialRecord {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contactId      String
+  contact        Contact  @relation(fields: [contactId], references: [id])
+  date           String   // "2026-05-25"
+  depositAmount  Float    @default(0)
+  withdrawAmount Float    @default(0)
+  netProfit      Float    @default(0)
+  depositCount   Int      @default(0)
+  withdrawCount  Int      @default(0)
+  gameBreakdown  String   @default("{}") // JSON: {lottery,slot,casino,fishing,sport,other}
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, contactId, date])
+}
+
+// =============================================
+// ★ NEW: Partner — พาร์ทเนอร์/Affiliate
+// =============================================
+
+model Partner {
+  id        String    @id @default(cuid())
+  tenantId  String
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code      String
+  name      String
+  phone     String?
+  commission Float   @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@unique([tenantId, code])
+}
+
+// =============================================
+// ★ Phase 8: SmsLog — ประวัติ SMS ที่ส่งทั้งหมด
+// =============================================
+
+model SmsLog {
+  id          String   @id @default(cuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  phone       String   // เบอร์ผู้รับ
+  message     String   // ข้อความที่ส่ง
+  sender      String   @default("CRM") // ชื่อผู้ส่ง (Sender Name)
+  status      String   @default("pending") // pending, sent, delivered, failed
+  provider    String   @default("thsms") // thsms, twilio, mock
+  providerMsgId String? // Message ID จาก provider
+  creditUsed  Float    @default(1) // จำนวน credit ที่ใช้
+  errorMsg    String?  // error message ถ้าส่งไม่ได้
+  contactId   String?  // ถ้าเชื่อมกับ contact
+  broadcastId String?  // ถ้าส่งจาก broadcast
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// =============================================
+// ★ NEW Phase 7: SyncLog — ประวัติการ Sync
+// =============================================
+
+model SyncLog {
+  id          String   @id @default(cuid())
+  tenantId    String
+  type        String   // members | deposits | transactions | csv_members | csv_transactions
+  status      String   // running | done | error
+  source      String   @default("api") // api | csv | webhook
+  totalRows   Int      @default(0)
+  inserted    Int      @default(0)
+  updated     Int      @default(0)
+  skipped     Int      @default(0)
+  errors      Int      @default(0)
+  errorDetail String?  // JSON array of error messages
+  filename    String?  // ชื่อไฟล์ CSV
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  duration    Int?     // milliseconds
+}
+
+// =============================================
+// ★ Phase 10: FlexTemplate — LINE FLEX Message Templates
+// =============================================
+
+model FlexTemplate {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String   // ชื่อ template
+  category  String   @default("custom") // welcome, promotion, vip, birthday, winback, custom
+  altText   String   @default("") // ข้อความสำรอง (กรณีไม่รองรับ FLEX)
+  flexJson  String   // JSON string ของ flex contents
+  isActive  Boolean  @default(true)
+  usedCount Int      @default(0) // ใช้กี่ครั้ง
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
