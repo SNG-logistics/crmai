@@ -19,8 +19,9 @@ const NAV = [
   { href: '/live',             icon: '🔴', label: 'Live Dashboard' },
   { href: '/flex',             icon: '💬', label: 'FLEX Builder' },
   { href: '/settings/import',  icon: '📥', label: 'Import ข้อมูล' },
-  { href: '/settings/sms',     icon: '📱', label: 'SMS Gateway' },
-  { href: '/settings/users',   icon: '👥', label: 'ทีม' },
+  { href: '/settings/sms',       icon: '📱', label: 'SMS Gateway' },
+  { href: '/settings/whatsapp',  icon: '💚', label: 'WhatsApp' },
+  { href: '/settings/users',     icon: '👥', label: 'ทีม' },
   { href: '/settings',         icon: '⚙️', label: 'ตั้งค่า' },
 ];
 

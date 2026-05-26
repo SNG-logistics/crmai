@@ -25,6 +25,8 @@ import syncRoutes from './routes/sync';
 import smsRoutes  from './routes/sms';
 import liveRoutes from './routes/live';
 import flexRoutes from './routes/flex';
+import whatsappRoutes from './routes/whatsapp';
+import { initWhatsAppSessions } from './services/whatsapp.service';
 import lineWebhookRoutes from './routes/webhooks/line';
 
 
@@ -78,7 +80,8 @@ app.use('/api/automation', automationRoutes);
 app.use('/api/sync',      syncRoutes);
 app.use('/api/sms',       smsRoutes);
 app.use('/api/live',      liveRoutes);
-app.use('/api/flex',      flexRoutes);
+app.use('/api/flex',       flexRoutes);
+app.use('/api/whatsapp',   whatsappRoutes);
 
 
 
@@ -107,6 +110,8 @@ async function main() {
       console.log(`🚀 CRM Backend running on http://localhost:${PORT}`);
       console.log(`📡 Socket.io ready`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
+      // Auto-reconnect WhatsApp sessions ที่มีอยู่
+      initWhatsAppSessions().catch(console.error);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

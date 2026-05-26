@@ -106,6 +106,7 @@ model Contact {
   avatar        String?
   lineUserId    String?
   telegramId    String?
+  whatsappId    String?  // format: "66812345678@s.whatsapp.net"
   webchatId     String?
   tags          ContactTag[]
   customFields  String   @default("{}")
