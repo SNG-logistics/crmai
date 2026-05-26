@@ -2,9 +2,27 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
 import axios from 'axios';
+import { startPkmListener, stopPkmListener, getPkmListenerStatus } from '../services/pkm-listener.service';
 
 const router = Router();
 router.use(verifyToken);
+
+// ─── GET /api/pkm/listener/status ─────────────────────────────────────────────
+router.get('/listener/status', (_req: Request, res: Response) => {
+  res.json({ success: true, listener: getPkmListenerStatus() });
+});
+
+// ─── POST /api/pkm/listener/start ─────────────────────────────────────────────
+router.post('/listener/start', (_req: Request, res: Response) => {
+  startPkmListener();
+  res.json({ success: true, message: '✅ PKM Listener เริ่มทำงาน' });
+});
+
+// ─── POST /api/pkm/listener/stop ──────────────────────────────────────────────
+router.post('/listener/stop', (_req: Request, res: Response) => {
+  stopPkmListener();
+  res.json({ success: true, message: '⏹️ PKM Listener หยุดทำงาน' });
+});
 
 // PKM Backend URL (configurable per tenant)
 const PKM_BASE = process.env.PKM_BASE_URL || 'https://pkm-bo.gamingcenter.club';

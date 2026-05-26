@@ -28,6 +28,7 @@ import flexRoutes from './routes/flex';
 import whatsappRoutes from './routes/whatsapp';
 import pkmRoutes from './routes/pkm';
 import { initWhatsAppSessions } from './services/whatsapp.service';
+import { startPkmListener } from './services/pkm-listener.service';
 import lineWebhookRoutes from './routes/webhooks/line';
 
 
@@ -144,6 +145,8 @@ async function main() {
       console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
       // Auto-reconnect WhatsApp sessions ที่มีอยู่
       initWhatsAppSessions().catch(console.error);
+      // Auto-start PKM real-time listener
+      startPkmListener();
     });
   } catch (error) {
     console.error('Failed to start server:', error);
