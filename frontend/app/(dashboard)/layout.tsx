@@ -4,34 +4,34 @@ import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/auth';
+import { useLang } from '../../store/lang';
 import { connectSocket, disconnectSocket, useSocket } from '../../lib/socket';
 
-const NAV = [
-  { href: '/dashboard',        icon: '🏠', label: 'Dashboard' },
-  { href: '/inbox',            icon: '💬', label: 'Inbox' },
-  { href: '/telesales',        icon: '📞', label: 'Telesales' },
-  { href: '/contacts',         icon: '👥', label: 'ลูกค้า' },
-  { href: '/tickets',          icon: '🎟️', label: 'Tickets' },
-  { href: '/broadcasts',       icon: '📣', label: 'Broadcast' },
-  { href: '/automation',       icon: '⚡', label: 'Automation' },
-  { href: '/bot',              icon: '🤖', label: 'AI Bot' },
-  { href: '/analytics',        icon: '📊', label: 'Analytics' },
-  { href: '/live',             icon: '🔴', label: 'Live Dashboard' },
-  { href: '/flex',             icon: '💬', label: 'FLEX Builder' },
-  { href: '/settings/import',  icon: '📥', label: 'Import ข้อมูล' },
-  { href: '/settings/sms',       icon: '📱', label: 'SMS Gateway' },
-  { href: '/settings/whatsapp',  icon: '💚', label: 'WhatsApp' },
-  { href: '/settings/users',     icon: '👥', label: 'ทีม' },
-  { href: '/settings',         icon: '⚙️', label: 'ตั้งค่า' },
-];
-
-
-
+// ─── NAV ใช้ translation key ────────────────────────────────────────────────
+const NAV_KEYS = [
+  { href: '/dashboard',        icon: '🏠', key: 'nav_dashboard'  },
+  { href: '/inbox',            icon: '💬', key: 'nav_inbox'      },
+  { href: '/telesales',        icon: '📞', key: 'nav_telesales'  },
+  { href: '/contacts',         icon: '👥', key: 'nav_contacts'   },
+  { href: '/tickets',          icon: '🎟️', key: 'nav_tickets'   },
+  { href: '/broadcasts',       icon: '📣', key: 'nav_broadcasts' },
+  { href: '/automation',       icon: '⚡', key: 'nav_automation' },
+  { href: '/bot',              icon: '🤖', key: 'nav_bot'        },
+  { href: '/analytics',        icon: '📊', key: 'nav_analytics'  },
+  { href: '/live',             icon: '🔴', key: 'nav_live'       },
+  { href: '/flex',             icon: '✉️', key: 'nav_flex'       },
+  { href: '/settings/import',  icon: '📥', key: 'nav_import'     },
+  { href: '/settings/sms',     icon: '📱', key: 'nav_sms'        },
+  { href: '/settings/whatsapp',icon: '💚', key: 'nav_whatsapp'   },
+  { href: '/settings/users',   icon: '👥', key: 'nav_team'       },
+  { href: '/settings',         icon: '⚙️', key: 'nav_settings'  },
+] as const;
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, tenant, token, logout, loadFromStorage, isLoading } = useAuthStore();
+  const { lang, setLang, t } = useLang();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inboxUnread, setInboxUnread] = useState(0);
   const [onlineStatus, setOnlineStatus] = useState<'online' | 'away'>('online');
@@ -61,19 +61,22 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (isLoading) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', flexDirection: 'column', gap: 16 }}>
       <div className="spinner" style={{ width: 40, height: 40 }} />
-      <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>กำลังโหลด...</div>
+      <div style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>{t('label_loading')}</div>
     </div>
   );
   if (!user) return null;
 
   const handleLogout = () => {
-    toast.success('👋 ออกจากระบบแล้ว');
+    toast.success(`👋 ${t('btn_logout')}`);
     disconnectSocket();
     logout();
     router.replace('/login');
   };
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + '/');
+
+  // ─── Toggle language ────────────────────────────────────────────────────────
+  const toggleLang = () => setLang(lang === 'th' ? 'lo' : 'th');
 
   return (
     <div>
@@ -98,7 +101,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>One-Stop Service</div>
             </div>
           </div>
-          {/* Tenant plan badge */}
           <span style={{ fontSize: '0.65rem', padding: '2px 8px', background: 'var(--teal-glow)', color: 'var(--teal)', borderRadius: 10, border: '1px solid rgba(0,212,170,0.2)', marginTop: 8, display: 'inline-block' }}>
             ✨ Starter Plan
           </span>
@@ -106,7 +108,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Nav */}
         <nav className="sidebar-nav">
-          {NAV.map(({ href, icon, label }) => {
+          {NAV_KEYS.map(({ href, icon, key }) => {
             const active = isActive(href);
             const badge = href === '/inbox' && inboxUnread > 0 ? inboxUnread : 0;
             return (
@@ -128,7 +130,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     }} />
                   )}
                 </span>
-                <span>{label}</span>
+                <span>{t(key as any)}</span>
                 {badge > 0 && (
                   <span style={{ marginLeft: 'auto', background: 'var(--danger)', color: '#fff', borderRadius: 10, padding: '1px 7px', fontSize: '0.65rem', fontWeight: 700, minWidth: 20, textAlign: 'center' }}>
                     {badge > 99 ? '99+' : badge}
@@ -141,13 +143,34 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
         {/* Footer */}
         <div className="sidebar-footer">
+          {/* ── Language Toggle ── */}
+          <button
+            onClick={toggleLang}
+            title={lang === 'th' ? 'Switch to Lao / ປ່ຽນເປັນພາສາລາວ' : 'Switch to Thai / เปลี่ยนเป็นภาษาไทย'}
+            style={{
+              width: '100%', padding: '6px 10px', marginBottom: 8,
+              borderRadius: 10, border: '1px solid var(--border)',
+              background: 'var(--bg-tertiary)', color: 'var(--text-primary)',
+              cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.78rem',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              transition: 'all 0.2s',
+            }}
+          >
+            {lang === 'th'
+              ? <><span>🇹🇭</span><span>ไทย</span><span style={{ color: 'var(--text-muted)' }}>→</span><span>🇱🇦</span><span style={{ color: 'var(--text-muted)' }}>ລາວ</span></>
+              : <><span>🇱🇦</span><span>ລາວ</span><span style={{ color: 'var(--text-muted)' }}>→</span><span>🇹🇭</span><span style={{ color: 'var(--text-muted)' }}>ໄທ</span></>
+            }
+          </button>
+
           {/* Status selector */}
           <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
             {(['online', 'away'] as const).map(s => (
               <button key={s} onClick={() => setOnlineStatus(s)}
                 style={{ flex: 1, padding: '4px 8px', borderRadius: 8, border: '1px solid var(--border)', background: onlineStatus === s ? 'var(--bg-hover)' : 'transparent', color: onlineStatus === s ? 'var(--text-primary)' : 'var(--text-muted)', cursor: 'pointer', fontSize: '0.72rem', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: s === 'online' ? 'var(--success)' : 'var(--warning)' }} />
-                {s === 'online' ? 'Online' : 'Away'}
+                {s === 'online'
+                  ? (lang === 'th' ? 'Online' : 'ອອນລາຍ')
+                  : (lang === 'th' ? 'Away' : 'ຫ່າງ')}
               </button>
             ))}
           </div>
@@ -164,7 +187,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </div>
           <button onClick={handleLogout} className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'center', marginTop: 4 }}>
-            🚪 ออกจากระบบ
+            🚪 {t('btn_logout')}
           </button>
         </div>
       </aside>
@@ -182,10 +205,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </button>
           <div style={{ flex: 1, minWidth: 0 }}>
             <h1 className="topbar-title" style={{ fontSize: '1rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {NAV.find(n => isActive(n.href))?.icon} {NAV.find(n => isActive(n.href))?.label || 'CRM'}
+              {NAV_KEYS.find(n => isActive(n.href))?.icon}{' '}
+              {t((NAV_KEYS.find(n => isActive(n.href))?.key as any) || 'nav_dashboard')}
             </h1>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+            {/* Language Badge */}
+            <button onClick={toggleLang} title="เปลี่ยนภาษา / ປ່ຽນພາສາ"
+              style={{ padding: '3px 10px', borderRadius: 20, border: '1px solid var(--border)', background: 'var(--bg-tertiary)', cursor: 'pointer', fontSize: '0.72rem', fontFamily: 'inherit', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              {lang === 'th' ? '🇹🇭 TH' : '🇱🇦 LO'}
+            </button>
             <div style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--success)', display: 'inline-block', boxShadow: '0 0 6px var(--success)' }} />
               <span style={{ color: 'var(--text-muted)' }}>API Online</span>

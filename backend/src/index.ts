@@ -58,6 +58,36 @@ app.use(express.urlencoded({ extended: true }));
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
+// Root — API Info
+app.get('/', (_req, res) => {
+  res.json({
+    name: '🎯 CRM มหาเฮง AI — Backend API',
+    version: '1.0.0',
+    status: 'running ✅',
+    timestamp: new Date().toISOString(),
+    docs: 'ดูคู่มือที่ https://github.com/SNG-logistics/crmai',
+    frontend: process.env.FRONTEND_URL || 'http://localhost:3000',
+    endpoints: {
+      auth:          'POST /api/auth/login, GET /api/auth/me',
+      conversations: 'GET /api/conversations, GET /api/conversations/stats',
+      contacts:      'GET /api/contacts, POST /api/contacts',
+      tickets:       'GET /api/tickets, POST /api/tickets',
+      bot:           'GET /api/bot, GET /api/bot/knowledge',
+      analytics:     'GET /api/analytics/dashboard, /daily, /members, /partners',
+      telesales:     'GET /api/telesales/dashboard, /kpi, /call-logs, /members',
+      broadcasts:    'GET /api/broadcasts, POST /api/broadcasts',
+      automation:    'GET /api/automation',
+      channels:      'GET /api/channels',
+      whatsapp:      'GET /api/whatsapp/status, POST /api/whatsapp/connect',
+      flex:          'GET /api/flex/templates',
+      sms:           'GET /api/sms/config, POST /api/sms/send',
+      live:          'GET /api/live/stats',
+      sync:          'GET /api/sync/logs, POST /api/sync/import',
+      webhooks:      'POST /api/webhooks/line/:tenantId, /telegram/:tenantId',
+    },
+  });
+});
+
 // Webhook routes (no auth)
 app.use('/api/webhooks/line', lineWebhookRoutes);
 app.use('/api/webhooks/telegram', telegramWebhookRoutes);

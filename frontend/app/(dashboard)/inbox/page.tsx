@@ -7,6 +7,7 @@ import { getSocket } from '../../../lib/socket';
 import styles from './inbox.module.css';
 import { formatDistanceToNow } from 'date-fns';
 import { th } from 'date-fns/locale';
+import { useLang } from '../../../store/lang';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
@@ -40,13 +41,14 @@ function playNotificationSound() {
 }
 
 // ─── FILTERS ─────────────────────────────────────────────────────────────────
-const FILTERS = [
-  { key: 'all', label: 'ทั้งหมด', icon: '📬' },
-  { key: 'open', label: 'เปิด', icon: '🔵' },
-  { key: 'mine', label: 'ของฉัน', icon: '👤' },
-  { key: 'bot', label: 'Bot', icon: '🤖' },
-  { key: 'pending', label: 'รอ', icon: '⏳' },
-  { key: 'resolved', label: 'แก้แล้ว', icon: '✅' },
+// ─── FILTERS (translated inside component) ─────────────────────────────────
+const FILTER_KEYS = [
+  { key: 'all',      labelTh: 'ทั้งหมด', labelLo: 'ທັງໝົດ',          icon: '📬' },
+  { key: 'open',     labelTh: 'เปิด',    labelLo: 'ເປີດ',            icon: '🔵' },
+  { key: 'mine',     labelTh: 'ของฉัน',  labelLo: 'ຂອງຂ້ອຍ',         icon: '👤' },
+  { key: 'bot',      labelTh: 'Bot',     labelLo: 'Bot',              icon: '🤖' },
+  { key: 'pending',  labelTh: 'รอ',      labelLo: 'ລໍຖ້າ',           icon: '⏳' },
+  { key: 'resolved', labelTh: 'แก้แล้ว', labelLo: 'ແກ້ໄຂແລ້ວ',     icon: '✅' },
 ];
 
 const CANNED = [
@@ -128,6 +130,9 @@ function MessageBubble({ msg, contactName }: { msg: Message; contactName: string
 
 // ─── Main Inbox Page ──────────────────────────────────────────────────────────
 export default function InboxPage() {
+  const { lang, t } = useLang();
+  const FILTERS = FILTER_KEYS.map(f => ({ ...f, label: lang === 'lo' ? f.labelLo : f.labelTh }));
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
