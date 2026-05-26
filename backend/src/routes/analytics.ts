@@ -168,6 +168,61 @@ router.get('/cohort', async (req: Request, res: Response) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /api/analytics/members?from=&to=&page=&limit=&tab=
+// รายงานสมาชิก — summary + paginated list
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/members', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.tenantId!;
+    const { from, to, affiliateCode, page = '1', limit = '25', tab = 'all' } = req.query;
+    const dateFrom = from ? new Date(from as string) : new Date(new Date().setDate(1));
+    const dateTo   = to   ? new Date(new Date(to as string).setHours(23,59,59,999)) : new Date();
+    const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
+
+    const where: any = { tenantId, createdAt: { gte: dateFrom, lte: dateTo } };
+    if (affiliateCode) where.affiliateCode = affiliateCode;
+    if (tab === 'deposit')    where.depositCount = { gte: 1 };
+    if (tab === 'no_deposit') where.totalDeposit = 0;
+
+    const [members, total, summary] = await Promise.all([
+      prisma.contact.findMany({
+        where,
+        select: {
+          id: true, displayName: true, username: true, phone: true,
+          affiliateCode: true, lineUserId: true, telegramId: true,
+          totalDeposit: true, totalWithdraw: true, depositCount: true, withdrawCount: true,
+          createdAt: true, firstDepositAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        skip, take: parseInt(limit as string),
+      }),
+      prisma.contact.count({ where }),
+      prisma.contact.aggregate({
+        where,
+        _sum: { totalDeposit: true, totalWithdraw: true, depositCount: true },
+        _count: { id: true },
+      }),
+    ]);
+
+    const withDeposit = await prisma.contact.count({ where: { ...where, depositCount: { gte: 1 } } });
+
+    res.json({
+      success: true, members,
+      total, page: parseInt(page as string), limit: parseInt(limit as string),
+      summary: {
+        total: summary._count.id,
+        withDeposit,
+        noDeposit: summary._count.id - withDeposit,
+        totalDeposit: summary._sum.totalDeposit || 0,
+        totalWithdraw: summary._sum.totalWithdraw || 0,
+        netProfit: (summary._sum.totalDeposit || 0) - (summary._sum.totalWithdraw || 0),
+        conversionRate: summary._count.id > 0 ? +((withDeposit / summary._count.id) * 100).toFixed(1) : 0,
+      },
+    });
+  } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /api/analytics/members/new?from=&to=&page=&limit=
 // รายงาน สมัคร-ฝากถอน-การเล่น สมาชิกใหม่
 // ─────────────────────────────────────────────────────────────────────────────
