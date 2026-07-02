@@ -29,17 +29,15 @@ khodtuengai.com, www.khodtuengai.com {
 	}
 }
 
-# ─── (ทำทีหลังได้) lufy บน subdomain ─────────────────────────────
-# ต้องแก้ modules/lufy/frontend/.env.local เป็น
+# ─── lufy บน subdomain (DNS: A link → VPS IP ตั้งแล้ว) ─────────────
+# modules/lufy/frontend/.env.local ต้องเป็น
 #     NEXT_PUBLIC_API_URL=https://link.khodtuengai.com/api
-# แล้ว build lufy frontend ใหม่ ก่อนเปิดบล็อกนี้
-#
-# link.khodtuengai.com {
-# 	encode gzip
-# 	handle /api/* {
-# 		reverse_proxy localhost:3001
-# 	}
-# 	handle {
-# 		reverse_proxy localhost:3002
-# 	}
-# }
+link.khodtuengai.com {
+	encode gzip
+	handle /api/* {
+		reverse_proxy localhost:3001
+	}
+	handle {
+		reverse_proxy localhost:3002
+	}
+}
