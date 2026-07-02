@@ -248,7 +248,7 @@ export default function LinksPage() {
 
       {/* Modal - Create/Edit Link */}
       {(showCreate || showEdit) && (
-        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && (setShowCreate(false) || setShowEdit(null))}>
+        <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) { setShowCreate(false); setShowEdit(null); } }}>
           <div className="modal" style={{ maxWidth: 580 }}>
             <div className="modal-header">
               <h3 className="modal-title">{showCreate ? '➕ สร้างลิงก์ย่อใหม่' : '✏️ แก้ไขลิงก์ย่อ'}</h3>

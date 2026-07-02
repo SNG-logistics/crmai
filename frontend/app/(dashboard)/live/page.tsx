@@ -140,8 +140,8 @@ export default function LivePage() {
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [tvMode, setTvMode]     = useState(false);
   const [countdown, setCountdown] = useState(10);
-  const intervalRef = useRef<NodeJS.Timeout>();
-  const countRef    = useRef<NodeJS.Timeout>();
+  const intervalRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const countRef    = useRef<NodeJS.Timeout | undefined>(undefined);
 
   const fetchStats = useCallback(async () => {
     try {

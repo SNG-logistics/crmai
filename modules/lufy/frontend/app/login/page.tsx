@@ -48,7 +48,7 @@ export default function LoginPage() {
         maxWidth: '420px',
         boxShadow: 'var(--shadow)',
       }}>
-        <div style={{ textCenter: 'center', marginBottom: 32, textAlign: 'center' }}>
+        <div style={{ marginBottom: 32, textAlign: 'center' }}>
           <span style={{ fontSize: '3rem' }}>👒</span>
           <h2 style={{ fontSize: '1.5rem', fontWeight: 800, background: 'var(--gradient-teal)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', marginTop: 12 }}>
             lufy.cc

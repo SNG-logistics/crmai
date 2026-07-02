@@ -179,7 +179,7 @@ export default function AuditLogsPage() {
                         {log.action}
                       </span>
                     </td>
-                    <td style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', maxBreak: 'break-all', wordBreak: 'break-word', lineHeight: 1.5 }}>
+                    <td style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', wordBreak: 'break-word', lineHeight: 1.5 }}>
                       {formatDetails(log.details)}
                     </td>
                     <td>
