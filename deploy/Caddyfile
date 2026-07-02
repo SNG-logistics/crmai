@@ -1,7 +1,7 @@
 # Caddy reverse proxy — โดเมน + HTTPS (Let's Encrypt) อัตโนมัติ
 # ───────────────────────────────────────────────────────────────
 # วิธีใช้ (บน VPS):
-#   1) แก้ example.com เป็นโดเมนจริงจาก GoDaddy (ทั้ง 2 บรรทัด)
+#   1) แก้ khodtuengai.com เป็นโดเมนจริงจาก GoDaddy (ทั้ง 2 บรรทัด)
 #   2) เปิด port 80 และ 443 ที่ Windows Firewall + firewall ของผู้ให้บริการ VPS
 #   3) ชี้ DNS (A record @ และ www) มาที่ IP ของ VPS ก่อน (ดู DEPLOY.md)
 #   4) รัน:  caddy run --config Caddyfile
@@ -9,7 +9,7 @@
 #
 # หมายเหตุ: Caddy รองรับ WebSocket upgrade ให้เอง — realtime (Socket.IO) ผ่านได้เลย
 
-example.com, www.example.com {
+khodtuengai.com, www.khodtuengai.com {
 	encode gzip
 
 	# API + realtime + ไฟล์อัปโหลด → backend (Express) พอร์ต 4000
@@ -31,10 +31,10 @@ example.com, www.example.com {
 
 # ─── (ทำทีหลังได้) lufy บน subdomain ─────────────────────────────
 # ต้องแก้ modules/lufy/frontend/.env.local เป็น
-#     NEXT_PUBLIC_API_URL=https://link.example.com/api
+#     NEXT_PUBLIC_API_URL=https://link.khodtuengai.com/api
 # แล้ว build lufy frontend ใหม่ ก่อนเปิดบล็อกนี้
 #
-# link.example.com {
+# link.khodtuengai.com {
 # 	encode gzip
 # 	handle /api/* {
 # 		reverse_proxy localhost:3001
