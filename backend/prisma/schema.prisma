@@ -39,7 +39,11 @@ model Tenant {
   financials      FinancialRecord[]
   partners        Partner[]
   smsLogs         SmsLog[]
-  flexTemplates   FlexTemplate[]
+  flexTemplates     FlexTemplate[]
+  auditLogs         AuditLog[]
+  slipVerifications SlipVerification[]
+  companies         Company[]
+  whatsappAccounts  WhatsAppAccount[]
 }
 
 // =============================================
@@ -52,7 +56,8 @@ model User {
   tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   email            String
   username         String
-  passwordHash     String
+  passwordHash     String?   // optional — Firebase Auth users (esp. Google sign-in) have no local password
+  firebaseUid      String?   @unique // links this user to its Firebase Auth account
   displayName      String
   avatar           String?
   role             String    @default("agent") // superadmin, admin, supervisor, agent, bot_manager, analyst
@@ -68,9 +73,69 @@ model User {
   tickets               Ticket[]          @relation("AssignedTickets")
   callLogs              CallLog[]         @relation("AgentCallLogs")
   telesalesTargets      TelesalesTarget[]
+  companies             UserCompany[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
+}
+
+// =============================================
+// Companies (Brands under a Tenant) — multi-company support
+// =============================================
+
+// บริษัท/แบรนด์ ภายใต้ 1 บัญชี (Tenant) — 1 tenant มีได้หลาย company
+model Company {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  slug      String?
+  logo      String?
+  isActive  Boolean  @default(true)
+  settings  String   @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  whatsappAccounts WhatsAppAccount[]
+  conversations    Conversation[]
+  botConfigs       BotConfig[]
+  members          UserCompany[]
+
+  @@unique([tenantId, name])
+}
+
+// WhatsApp accounts (เบอร์) ต่อ Company — รองรับหลายเบอร์ต่อบริษัท
+model WhatsAppAccount {
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  label      String   @default("WhatsApp")     // ชื่อเรียกเบอร์ (แสดงใน UI)
+  phone      String?                            // เบอร์ที่ล็อกอินสำเร็จ
+  sessionId  String?                            // ชื่อโฟลเดอร์ auth บนดิสก์ (default = id ; migrated = tenantId เพื่อรีใช้ session เดิม)
+  status     String   @default("disconnected") // qr | connecting | connected | disconnected
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  conversations Conversation[]
+
+  @@index([tenantId, companyId])
+}
+
+// User ↔ Company membership — แอดมิน/เอเจนต์ผูกได้หลายบริษัท (many-to-many)
+// ไม่มีแถว = เห็นทุกบริษัทใน tenant (owner/superadmin) ; มีแถว = จำกัดเฉพาะบริษัทที่ระบุ
+model UserCompany {
+  userId    String
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  role      String? // เผื่อ override role ราย company ในอนาคต
+  createdAt DateTime @default(now())
+
+  @@id([userId, companyId])
+  @@index([companyId])
 }
 
 // =============================================
@@ -149,6 +214,10 @@ model Conversation {
   id            String    @id @default(cuid())
   tenantId      String
   tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId         String?          // บริษัทที่บทสนทนานี้สังกัด (null = ยังไม่ backfill / default company)
+  company           Company?         @relation(fields: [companyId], references: [id])
+  whatsAppAccountId String?          // เบอร์ WhatsApp ที่รับข้อความนี้ (เฉพาะ channel=whatsapp)
+  whatsAppAccount   WhatsAppAccount? @relation(fields: [whatsAppAccountId], references: [id])
   contactId     String
   contact       Contact   @relation(fields: [contactId], references: [id])
   channel       String    // line, telegram, webchat
@@ -167,6 +236,8 @@ model Conversation {
   ticket   Ticket?
 
   @@unique([tenantId, channel, channelId])
+  @@index([companyId])
+  @@index([whatsAppAccountId])
 }
 
 // =============================================
@@ -245,16 +316,21 @@ model BotConfig {
   id            String          @id @default(cuid())
   tenantId      String
   tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId     String?         // บริษัทเจ้าของ config นี้ (null = config ระดับ tenant เดิม)
+  company       Company?        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name          String
   isActive      Boolean         @default(true)
   systemPrompt  String          @default("You are a helpful customer service assistant.")
   model         String          @default("gpt-4o")
   temperature   Float           @default(0.7)
+  metadata      String          @default("{}")
   knowledgeBase KnowledgeBase[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
-  @@unique([tenantId])
+  // per-company AI: 1 บริษัท = 1 ชุดตั้งค่า AI (โหลด/บันทึกด้วย companyId)
+  @@unique([companyId])
+  @@index([tenantId])
 }
 
 // =============================================
@@ -455,4 +531,71 @@ model FlexTemplate {
   usedCount Int      @default(0) // ใช้กี่ครั้ง
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// =============================================
+// ★ Phase 11: AuditLog — บันทึกประวัติการทำงาน
+// =============================================
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId    String?
+  action    String   // e.g. "USER_LOGIN", "CONTACT_EXPORT", "TICKET_DELETE", "BOT_UPDATE"
+  details   String   // JSON string of details
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+}
+
+// =============================================
+// ★ Slip Verification — ตรวจสอบสลิปโอนเงิน
+// =============================================
+
+model SlipVerification {
+  id              String   @id @default(cuid())
+  tenantId        String
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId  String
+  contactId       String
+  messageId       String   // message ที่ส่งรูปมา
+
+  // ─── Image Info ───
+  imageHash       String   // SHA-256 hash ของรูป (เช็คสลิปซ้ำ)
+  imagePath       String   // path ที่เก็บรูป
+
+  // ─── SlipOK Result ───
+  slipokSuccess   Boolean?
+  transRef        String?  // transaction reference
+  sendingBank     String?
+  receivingBank   String?
+  amount          Float?
+  transDate       String?
+  transTime       String?
+  senderName      String?
+  receiverName    String?
+
+  // ─── AI Vision Result ───
+  aiSuccess       Boolean?
+  aiAmount        Float?
+  aiBankFrom      String?
+  aiBankTo        String?
+  aiTransDate     String?
+  aiConfidence    String?  // high, medium, low
+  aiSuspicious    Boolean  @default(false)
+  aiReason        String?
+
+  // ─── Final Verdict ───
+  status          String   @default("pending") // pending, verified, fake, duplicate, error
+  verifiedBy      String   @default("auto")    // auto, slipok, ai, manual
+  isDuplicate     Boolean  @default(false)
+  duplicateOfId   String?
+
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([imageHash])
+  @@index([transRef])
 }

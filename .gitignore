@@ -15,11 +15,24 @@ out/
 .env.production
 .env.*.local
 
-# Database (local dev only)
+# Firebase service-account credentials (ความลับ — ห้าม push!)
+serviceAccount.json
+**/serviceAccount.json
+*-firebase-adminsdk-*.json
+.firebase/
+
+# Database (local dev only) + backups
 backend/prisma/dev.db
 backend/prisma/dev.db-journal
 backend/prisma/*.db
 backend/prisma/*.db-journal
+backend/prisma/*.db.bak-*
+modules/lufy/backend/prisma/*.db
+modules/lufy/backend/prisma/*.db-journal
+
+# WhatsApp session credentials (ความลับ — ห้าม push!)
+auth_whatsapp/
+backend/auth_whatsapp/
 
 # Logs
 *.log

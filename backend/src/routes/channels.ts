@@ -114,6 +114,124 @@ router.post('/line/verify', async (req: Request, res: Response) => {
   }
 });
 
+// ─── POST /api/channels/line/sync-followers ──────────────────────────────────
+router.post('/line/sync-followers', async (req: Request, res: Response) => {
+  try {
+    const channelConfig = await prisma.channelConfig.findUnique({
+      where: { tenantId_channel: { tenantId: req.tenantId!, channel: 'line' } },
+    });
+
+    if (!channelConfig || !channelConfig.isActive) {
+      return res.status(400).json({ success: false, message: 'กรุณาเชื่อมต่อ LINE OA ก่อน' });
+    }
+
+    let config: any = channelConfig.config;
+    if (typeof config === 'string') {
+      try { config = JSON.parse(config); } catch { config = {}; }
+    }
+    const { accessToken } = config;
+    if (!accessToken) {
+      return res.status(400).json({ success: false, message: 'ไม่พบ Access Token สำหรับ LINE OA' });
+    }
+
+    let userIds: string[] = [];
+    let nextToken: string | undefined = undefined;
+
+    // 1. ดึง User IDs ทั้งหมดจาก LINE API
+    do {
+      const urlStr: string = 'https://api.line.me/v2/bot/followers/ids' + (nextToken ? `?start=${nextToken}` : '');
+      const resp: any = await axios.get(urlStr, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 15000,
+      });
+      if (resp.data.userIds && Array.isArray(resp.data.userIds)) {
+        userIds.push(...resp.data.userIds);
+      }
+      nextToken = resp.data.next;
+    } while (nextToken);
+
+    console.log(`[LINE Sync] Found ${userIds.length} followers for tenant ${req.tenantId}`);
+
+    let synced = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    // 2. นำข้อมูลบันทึกลงระบบฐานข้อมูล CRM
+    for (const userId of userIds) {
+      try {
+        const existingContact = await prisma.contact.findUnique({
+          where: { tenantId_lineUserId: { tenantId: req.tenantId!, lineUserId: userId } },
+        });
+
+        if (existingContact) {
+          skipped++;
+          continue;
+        }
+
+        // ดึงข้อมูลโปรไฟล์ (ชื่อแสดงผล, รูปภาพ)
+        let profile: any = null;
+        try {
+          const profResp = await axios.get(`https://api.line.me/v2/bot/profile/${userId}`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+            timeout: 5000,
+          });
+          profile = profResp.data;
+        } catch (profErr: any) {
+          console.warn(`[LINE Sync] Failed to get profile for ${userId}:`, profErr.message);
+        }
+
+        const displayName = profile?.displayName || 'LINE User';
+        const avatar = profile?.pictureUrl || null;
+
+        // บันทึกผู้ติดต่อในฐานข้อมูล
+        const newContact = await prisma.contact.create({
+          data: {
+            tenantId: req.tenantId!,
+            lineUserId: userId,
+            displayName,
+            avatar,
+          },
+        });
+
+        // สร้างห้องแชทในระบบ
+        await prisma.conversation.create({
+          data: {
+            tenantId: req.tenantId!,
+            contactId: newContact.id,
+            channel: 'line',
+            channelId: userId,
+            status: 'bot',
+            isBot: true,
+            lastMessageAt: new Date(),
+          },
+        });
+
+        synced++;
+        // ป้องกันการยิงถี่เกินไปจนติด rate limit
+        await new Promise(resolve => setTimeout(resolve, 50));
+      } catch (err: any) {
+        errors++;
+        console.error(`[LINE Sync] Error syncing user ${userId}:`, err.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `ดึงข้อมูลเสร็จสิ้น: นำเข้าใหม่ ${synced} ราย, มีอยู่แล้ว ${skipped} ราย, ล้มเหลว ${errors} ราย`,
+      stats: { synced, skipped, errors, total: userIds.length },
+    });
+  } catch (e: any) {
+    console.error('[LINE Sync] Sync followers failed:', e.message || e);
+    let errorMsg = 'เกิดข้อผิดพลาดในการดึงข้อมูลผู้ติดตาม';
+    if (e.response?.status === 403 || e.response?.data?.message?.includes('not available')) {
+      errorMsg = '❌ บัญชี LINE OA ของคุณไม่รองรับการดึงข้อมูลนี้ (ต้องเป็นบัญชีที่ได้รับการรับรอง - Verified Account หรือ Premium Account เท่านั้นจึงจะสามารถใช้ API ดึงผู้ติดตามได้ค่ะ)';
+    } else {
+      errorMsg = e?.response?.data?.message || e.message || errorMsg;
+    }
+    res.status(500).json({ success: false, message: errorMsg });
+  }
+});
+
 // ─── POST /api/channels/telegram ─────────────────────────────────────────────
 router.post('/telegram', async (req: Request, res: Response) => {
   try {

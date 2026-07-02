@@ -10,7 +10,13 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:generate": "prisma generate",
     "prisma:studio": "prisma studio",
-    "seed": "ts-node-dev --transpile-only src/scripts/seed.ts"
+    "seed": "ts-node-dev --transpile-only src/scripts/seed.ts",
+    "clear-whatsapp": "ts-node-dev --transpile-only src/scripts/clear-whatsapp.ts",
+    "setup-owner": "ts-node-dev --transpile-only src/scripts/setup-owner.ts",
+    "backfill-company": "ts-node-dev --transpile-only src/scripts/backfill-company.ts",
+    "wipe-customers": "ts-node-dev --transpile-only src/scripts/wipe-customers.ts",
+    "provision-user": "ts-node-dev --transpile-only src/scripts/provision-user.ts",
+    "export-line-ids": "ts-node-dev --transpile-only src/scripts/export-line-ids.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.8.0",
@@ -24,6 +30,8 @@
     "dotenv": "^16.4.1",
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
+    "firebase-admin": "^14.1.0",
+    "form-data": "^4.0.5",
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",

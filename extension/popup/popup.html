@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CRM LINE Sync</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">🔌</div>
+      <div class="header-text">
+        <div class="title">CRM LINE Sync</div>
+        <div class="subtitle">ซิงก์ข้อความไป CRM แบบ real-time</div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="enabledToggle" />
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <!-- Status Bar -->
+    <div id="statusBar" class="status-bar status-unknown">
+      <span id="statusDot" class="status-dot"></span>
+      <span id="statusText">ยังไม่ได้ทดสอบการเชื่อมต่อ</span>
+    </div>
+
+    <!-- Active Chat Placeholder (เมื่อไม่มีการเลือกแชท) -->
+    <div id="hudNoChatPlaceholder" class="hud-placeholder" style="padding: 16px; text-align: center; color: #64748b; background: rgba(255,255,255,0.01); border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 11px;">
+      ℹ️ เปิดห้องแชทของลูกค้าใน LINE OA เพื่อแสดงข้อมูลลูกค้า CRM ที่นี่
+    </div>
+
+    <!-- CRM Profile HUD & Quick Tools -->
+    <div id="crmHudSection" class="hud-section" style="display: none;">
+      <!-- Loading State -->
+      <div id="hudLoading" class="hud-loading" style="display: none;">
+        <span class="spinner"></span> กำลังดึงข้อมูลจาก CRM...
+      </div>
+
+      <!-- Not Linked State (One-Click Linker) -->
+      <div id="hudNotLinked" class="hud-card glass-card" style="display: none; margin-bottom: 8px;">
+        <div class="hud-header warn">
+          <span class="hud-title">⚠️ ยังไม่ผูกบัญชี CRM</span>
+        </div>
+        <div class="hud-body">
+          <p class="hud-desc">LINE ID ของผู้ใช้คนนี้ยังไม่ได้เชื่อมเข้ากับบัญชีสมาชิกของ CRM</p>
+          <div class="field" style="margin-top: 8px;">
+            <label for="linkUsername">👤 Username หรือเบอร์โทรสมาชิก</label>
+            <input type="text" id="linkUsername" placeholder="เช่น player77 / 0812345678" style="font-size: 11px;" />
+          </div>
+          <button id="linkBtn" class="btn btn-primary" style="margin-top: 8px; width: 100%; font-size: 11px; display: flex; align-items: center; justify-content: center; gap: 4px;">
+            🔗 ผูกบัญชีสมาชิก CRM
+          </button>
+        </div>
+      </div>
+
+      <!-- Linked State (HUD Profile details) -->
+      <div id="hudLinked" class="hud-card glass-card" style="display: none; margin-bottom: 8px;">
+        <!-- Blocked Banner -->
+        <div id="hudBlockedBanner" class="hud-blocked-banner" style="display: none;">
+          🚫 ลูกค้าบล็อค LINE OA ของคุณแล้ว — ไม่สามารถส่งข้อความถึงได้
+        </div>
+        <div class="hud-header">
+          <div class="hud-profile-meta">
+            <span class="hud-vip-badge" id="hudVipBadge">new</span>
+            <span class="hud-username" id="hudUsername">username</span>
+          </div>
+          <span class="hud-phone" id="hudPhone">phone</span>
+        </div>
+        <div class="hud-body">
+          <!-- Fin Stats Table -->
+          <div class="hud-fin-grid">
+            <div class="hud-fin-item dep">
+              <span class="label">ฝากทั้งหมด</span>
+              <span class="val" id="hudTotalDeposit">฿0</span>
+              <span class="sub" id="hudDepositCount">0 ครั้ง</span>
+            </div>
+            <div class="hud-fin-item wd">
+              <span class="label">ถอนทั้งหมด</span>
+              <span class="val" id="hudTotalWithdraw">฿0</span>
+              <span class="sub" id="hudWithdrawCount">0 ครั้ง</span>
+            </div>
+            <div class="hud-fin-item pnl">
+              <span class="label">กำไร/ขาดทุน</span>
+              <span class="val" id="hudNetProfit">฿0</span>
+              <span class="sub">สุทธิ</span>
+            </div>
+          </div>
+
+          <!-- Active Tickets -->
+          <div id="hudTicketsSection" class="hud-tickets" style="margin-top: 8px;">
+            <div class="hud-sub-title">🎫 ตั๋วปัญหาล่าสุด</div>
+            <div id="hudTicketsList" class="hud-tickets-list">
+              <!-- tickets render here -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Flex Message Sender (แสดงตลอดเวลาเมื่อเปิดห้องแชท) -->
+      <div id="hudFlexSenderSection" class="hud-card glass-card" style="margin-top: 8px;">
+        <div class="hud-sub-title">✉️ ส่ง Flex Message ด่วน</div>
+        <div style="display: flex; gap: 6px; margin-top: 4px; align-items: center;">
+          <select id="hudFlexSelect" style="flex: 1; background: #1e293b; color: #fff; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 6px; font-size: 11px; outline: none; min-width: 0;">
+            <option value="">-- เลือกแม่แบบ Flex --</option>
+          </select>
+          <button id="hudSendFlexBtn" class="btn btn-primary" style="padding: 6px 12px; flex: none; font-size: 11px; margin-top: 0; width: auto;">ส่ง Flex</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Form -->
+    <div class="form">
+      <div class="field">
+        <label for="crmUrl">🌐 CRM Backend URL</label>
+        <input
+          type="url"
+          id="crmUrl"
+          placeholder="https://your-crm.com"
+          autocomplete="off"
+        />
+      </div>
+
+      <div class="field">
+        <label for="tenantId">🏪 Tenant ID</label>
+        <input
+          type="text"
+          id="tenantId"
+          placeholder="happy77"
+          autocomplete="off"
+        />
+      </div>
+
+      <div class="field">
+        <label for="token">🔑 API Token</label>
+        <div class="input-wrap">
+          <input
+            type="password"
+            id="token"
+            placeholder="Bearer token จาก CRM"
+            autocomplete="off"
+          />
+          <button id="toggleToken" class="icon-btn" title="แสดง/ซ่อน token">👁</button>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <button id="testBtn" class="btn btn-outline">🔍 ทดสอบ</button>
+        <button id="saveBtn" class="btn btn-primary">💾 บันทึก</button>
+      </div>
+      <div class="btn-row" style="margin-top: 6px;">
+        <button id="exportBtn" class="btn btn-outline" style="border-color: rgba(56, 189, 248, 0.3); color: #38bdf8; width: 100%; flex: none; display: flex; align-items: center; justify-content: center; gap: 6px;" title="ดึง LINE ID ของทุกคนที่แสดงบนหน้านี้เป็นไฟล์ CSV">
+          📥 ดึง LINE ID จากหน้าเว็บ
+        </button>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value" id="syncCount">0</div>
+        <div class="stat-label">ส่งสำเร็จ</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="queueCount">0</div>
+        <div class="stat-label">รอ Retry</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value" id="sessionCount">0</div>
+        <div class="stat-label">Session นี้</div>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-section">
+      <div class="log-header">
+        <span>📋 Log ล่าสุด</span>
+        <button id="clearLog" class="icon-btn small">🗑</button>
+      </div>
+      <div id="logList" class="log-list">
+        <div class="log-empty">ยังไม่มี log</div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <a href="https://manager.line.biz" target="_blank">เปิด LINE OA Manager</a>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

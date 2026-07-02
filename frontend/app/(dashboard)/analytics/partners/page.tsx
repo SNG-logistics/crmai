@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import toast from 'react-hot-toast';
-import api from '../../../lib/api';
+import api from '@/lib/api';
 
 type Partner = { code: string; members: number; withDeposit: number; totalDeposit: number; totalWithdraw: number; netProfit: number; conversionRate: number };
 

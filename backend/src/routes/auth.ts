@@ -4,7 +4,8 @@ import jwt from 'jsonwebtoken';
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 import prisma from '../lib/prisma';
-import { verifyToken } from '../middleware/auth';
+import { verifyToken, legacyJwtEnabled } from '../middleware/auth';
+import { createAuditLog } from '../lib/audit';
 
 const router = Router();
 
@@ -13,6 +14,12 @@ router.post('/login', async (req: Request, res: Response) => {
   try {
     const { username, password, token: twoFAToken, tenantSlug } = req.body;
     if (!username || !password) return res.status(400).json({ success: false, message: 'กรุณากรอก Username และ Password' });
+
+    // Legacy login is disabled (or JWT_SECRET is the placeholder) → don't hand out a
+    // token the verifier will reject. Funnel users to Firebase sign-in instead.
+    if (!legacyJwtEnabled()) {
+      return res.status(403).json({ success: false, message: 'การเข้าสู่ระบบแบบเดิมถูกปิด — กรุณาเข้าสู่ระบบผ่าน Firebase (Google หรือ Email/Password)' });
+    }
 
     // Find tenant
     let user;
@@ -32,6 +39,11 @@ router.post('/login', async (req: Request, res: Response) => {
 
     if (!user) return res.status(401).json({ success: false, message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
 
+    // Firebase-only accounts have no local password — they must log in via Firebase.
+    if (!user.passwordHash) {
+      return res.status(401).json({ success: false, message: 'บัญชีนี้เข้าสู่ระบบผ่าน Firebase (Google หรือ Email/Password)' });
+    }
+
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) return res.status(401).json({ success: false, message: 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
 
@@ -47,6 +59,16 @@ router.post('/login', async (req: Request, res: Response) => {
     const refreshToken = jwt.sign({ id: user.id }, process.env.JWT_REFRESH_SECRET!, { expiresIn: '7d' });
 
     await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+
+    // บันทึก Audit Log
+    await createAuditLog(
+      user.tenantId,
+      user.id,
+      'USER_LOGIN',
+      { username: user.username, role: user.role },
+      req.ip,
+      req.headers['user-agent']
+    );
 
     res.json({
       success: true,
@@ -66,6 +88,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
   try {
     const { refreshToken } = req.body;
     if (!refreshToken) return res.status(401).json({ success: false, message: 'No refresh token' });
+    if (!legacyJwtEnabled()) return res.status(403).json({ success: false, message: 'การเข้าสู่ระบบแบบเดิมถูกปิด' });
     const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET!) as { id: string };
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },

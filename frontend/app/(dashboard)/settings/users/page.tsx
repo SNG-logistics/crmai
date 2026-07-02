@@ -24,8 +24,11 @@ type User = {
   id: string; email: string; username: string; displayName: string;
   role: string; isActive: boolean; twoFactorEnabled: boolean;
   lastLoginAt?: string; createdAt: string;
+  companyIds?: string[];
   _count?: { assignedConversations: number; tickets: number };
 };
+
+type Company = { id: string; name: string };
 
 export default function UsersPage() {
   const { user: me } = useAuthStore();
@@ -36,6 +39,11 @@ export default function UsersPage() {
   const [form, setForm] = useState({ displayName: '', email: '', username: '', role: 'agent', password: '' });
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
+  // Per-company assignment
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [companyUser, setCompanyUser] = useState<User | null>(null);
+  const [companySel, setCompanySel] = useState<string[]>([]);
+  const [savingCompanies, setSavingCompanies] = useState(false);
 
   const load = async () => {
     try { const r = await api.get('/users'); setUsers(r.data.users || []); }
@@ -43,7 +51,36 @@ export default function UsersPage() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, []);
+  const loadCompanies = async () => {
+    try { const r = await api.get('/companies'); setCompanies(r.data.companies || []); }
+    catch { /* ไม่ critical — ปล่อยว่างไว้ */ }
+  };
+
+  useEffect(() => { load(); loadCompanies(); }, []);
+
+  const companyNames = (ids?: string[]) =>
+    (ids || []).map(id => companies.find(c => c.id === id)?.name).filter(Boolean) as string[];
+
+  const openCompanies = (u: User) => {
+    setCompanyUser(u);
+    setCompanySel(u.companyIds || []);
+  };
+
+  const toggleCompany = (id: string) =>
+    setCompanySel(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  const saveCompanies = async () => {
+    if (!companyUser) return;
+    setSavingCompanies(true);
+    const tid = toast.loading('กำลังบันทึกสิทธิ์บริษัท...');
+    try {
+      await api.put(`/users/${companyUser.id}/companies`, { companyIds: companySel });
+      setUsers(prev => prev.map(x => x.id === companyUser.id ? { ...x, companyIds: [...companySel] } : x));
+      toast.success('✅ บันทึกสิทธิ์บริษัทแล้ว', { id: tid });
+      setCompanyUser(null);
+    } catch (e: any) { toast.error(e.response?.data?.message || 'เกิดข้อผิดพลาด', { id: tid }); }
+    finally { setSavingCompanies(false); }
+  };
 
   const openCreate = () => {
     setEditUser(null);
@@ -133,6 +170,7 @@ export default function UsersPage() {
                 <tr>
                   <th>ผู้ใช้</th>
                   <th>Role</th>
+                  <th>บริษัทที่เข้าถึง</th>
                   <th>บทสนทนา</th>
                   <th>Tickets</th>
                   <th>2FA</th>
@@ -143,7 +181,7 @@ export default function UsersPage() {
               </thead>
               <tbody>
                 {filtered.length === 0 && (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>ไม่พบผู้ใช้</td></tr>
+                  <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>ไม่พบผู้ใช้</td></tr>
                 )}
                 {filtered.map(u => (
                   <tr key={u.id}>
@@ -166,6 +204,21 @@ export default function UsersPage() {
                       <span style={{ background: (ROLE_COLORS[u.role] || 'var(--teal)') + '22', color: ROLE_COLORS[u.role] || 'var(--teal)', border: `1px solid ${(ROLE_COLORS[u.role] || 'var(--teal)') + '44'}`, borderRadius: 20, padding: '2px 10px', fontSize: '0.75rem', fontWeight: 600 }}>
                         {u.role}
                       </span>
+                    </td>
+                    <td>
+                      <button className="btn btn-ghost btn-sm" onClick={() => openCompanies(u)} title="กำหนดบริษัทที่เข้าถึงได้"
+                        style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxWidth: 260, justifyContent: 'flex-start', height: 'auto', padding: '4px 6px' }}>
+                        {(() => {
+                          const names = companyNames(u.companyIds);
+                          if (names.length === 0) return <span style={{ fontSize: '0.75rem', background: 'var(--teal-glow)', color: 'var(--teal)', border: '1px solid var(--teal)', borderRadius: 20, padding: '2px 10px', fontWeight: 600 }}>🌐 ทุกบริษัท</span>;
+                          return <>
+                            {names.slice(0, 2).map((n, i) => (
+                              <span key={i} style={{ fontSize: '0.72rem', background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 20, padding: '2px 8px', color: 'var(--text-secondary)' }}>{n}</span>
+                            ))}
+                            {names.length > 2 && <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>+{names.length - 2}</span>}
+                          </>;
+                        })()}
+                      </button>
                     </td>
                     <td><span style={{ fontWeight: 600, color: 'var(--teal)' }}>{u._count?.assignedConversations || 0}</span></td>
                     <td><span style={{ fontWeight: 600, color: 'var(--purple)' }}>{u._count?.tickets || 0}</span></td>
@@ -240,6 +293,52 @@ export default function UsersPage() {
               <button className="btn btn-ghost" onClick={() => setShowModal(false)}>ยกเลิก</button>
               <button className="btn btn-primary" onClick={save} disabled={saving}>
                 {saving ? <span className="spinner" style={{ width: 14, height: 14 }} /> : editUser ? '💾 บันทึก' : '➕ สร้าง Agent'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Company Assignment Modal */}
+      {companyUser && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setCompanyUser(null)}>
+          <div className="modal" style={{ maxWidth: 460 }}>
+            <div className="modal-header">
+              <div className="modal-title">🏢 กำหนดบริษัทที่เข้าถึงได้</div>
+              <button className="btn btn-ghost btn-sm btn-icon" onClick={() => setCompanyUser(null)}>✕</button>
+            </div>
+
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: 12 }}>
+              เลือกบริษัทที่ <b style={{ color: 'var(--text-primary)' }}>{companyUser.displayName}</b> จะเข้าถึงได้ —
+              หากไม่เลือกบริษัทใดเลย ผู้ใช้จะ<b style={{ color: 'var(--teal)' }}>เห็นทุกบริษัท</b>
+            </div>
+
+            <div className="form-group">
+              {companies.length === 0 ? (
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', padding: 12, textAlign: 'center' }}>ยังไม่มีบริษัทในระบบ</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+                  {companies.map(c => {
+                    const on = companySel.includes(c.id);
+                    return (
+                      <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: `1px solid ${on ? 'var(--teal)' : 'var(--border)'}`, borderRadius: 8, cursor: 'pointer', background: on ? 'var(--teal-glow)' : 'transparent', transition: 'all 0.15s' }}>
+                        <input type="checkbox" checked={on} onChange={() => toggleCompany(c.id)} style={{ accentColor: 'var(--teal)' }} />
+                        <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>{c.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div style={{ fontSize: '0.78rem', color: companySel.length === 0 ? 'var(--teal)' : 'var(--text-secondary)', marginBottom: 8 }}>
+              {companySel.length === 0 ? '🌐 ตอนนี้: เห็นทุกบริษัท (ไม่จำกัด)' : `จำกัด ${companySel.length} บริษัท`}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn btn-ghost" onClick={() => setCompanyUser(null)}>ยกเลิก</button>
+              <button className="btn btn-primary" onClick={saveCompanies} disabled={savingCompanies}>
+                {savingCompanies ? <span className="spinner" style={{ width: 14, height: 14 }} /> : '💾 บันทึกสิทธิ์'}
               </button>
             </div>
           </div>

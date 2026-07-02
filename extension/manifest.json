@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "CRM LINE Sync",
+  "version": "1.0.0",
+  "description": "ซิงก์ข้อความแอดมินจาก LINE OA Manager เข้า CRM แบบ real-time",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "sidePanel",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://manager.line.biz/*",
+    "https://chat.line.biz/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://manager.line.biz/*",
+        "https://chat.line.biz/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "CRM LINE Sync"
+  },
+  "side_panel": {
+    "default_path": "popup/popup.html"
+  }
+}

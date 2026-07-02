@@ -32,7 +32,14 @@ const DEPOSIT_EVENTS  = ['member_deposit',  'member_notideposit',  'deposit',  '
 const ALL_EVENTS      = [...WITHDRAW_EVENTS, ...DEPOSIT_EVENTS];
 
 // ─── Connect & start listening ────────────────────────────────────────────────
+const MAX_RECONNECTS = parseInt(process.env.PKM_MAX_RECONNECTS || '10');
+
 export function startPkmListener() {
+  // ปิด PKM listener ได้โดยตั้ง PKM_ENABLED=false ใน .env
+  if (process.env.PKM_ENABLED === 'false') {
+    console.log('[PKM] ⏭️  PKM listener disabled (PKM_ENABLED=false)');
+    return;
+  }
   if (isRunning) return;
   isRunning = true;
   console.log('[PKM] 🔌 Starting real-time listener...');
@@ -98,9 +105,18 @@ function doConnect() {
 
 function scheduleReconnect() {
   if (!isRunning) return;
+
+  // หยุด reconnect เมื่อถึง MAX_RECONNECTS เพื่อป้องกัน infinite loop
+  if (stats.reconnects >= MAX_RECONNECTS) {
+    console.warn(`[PKM] ⛔ Max reconnect attempts (${MAX_RECONNECTS}) reached — giving up.`);
+    console.warn('[PKM] 💡 ตั้ง PKM_ENABLED=false ใน .env เพื่อปิด listener นี้');
+    isRunning = false;
+    return;
+  }
+
   if (reconnectTimer) clearTimeout(reconnectTimer);
   const delay = Math.min(30000, 5000 * (stats.reconnects + 1)); // 5s, 10s, 15s... max 30s
-  console.log(`[PKM] 🔄 Reconnecting in ${delay / 1000}s...`);
+  console.log(`[PKM] 🔄 Reconnecting in ${delay / 1000}s... (${stats.reconnects + 1}/${MAX_RECONNECTS})`);
   reconnectTimer = setTimeout(() => {
     stats.reconnects++;
     doConnect();

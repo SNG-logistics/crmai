@@ -1,5 +1,7 @@
 'use client';
 import { create } from 'zustand';
+import { signOut } from 'firebase/auth';
+import { auth } from '../lib/firebase';
 
 interface AuthUser {
   id: string; tenantId: string; email: string; username: string;
@@ -26,6 +28,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ user, tenant, token, isLoading: false });
   },
   logout: () => {
+    signOut(auth).catch(() => {});
     localStorage.removeItem('crm_token');
     localStorage.removeItem('crm_user');
     localStorage.removeItem('crm_tenant');

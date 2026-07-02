@@ -109,3 +109,49 @@ export async function getLineProfile(userId: string, accessToken: string): Promi
 export function lineTextMessage(text: string) {
   return { type: 'text', text };
 }
+
+/**
+ * Build LINE text message with Quick Reply buttons
+ */
+export function lineTextWithQuickReply(text: string, quickReplies?: { label: string; text: string }[]) {
+  const defaultReplies = [
+    { label: '📋 สมัครสมาชิก',    text: 'สนใจสมัครสมาชิก' },
+    { label: '💰 ฝากเงิน',        text: 'ต้องการฝากเงิน' },
+    { label: '💸 ถอนเงิน',        text: 'ต้องการถอนเงิน' },
+    { label: '🎁 โปรโมชั่น',      text: 'โปรโมชั่นมีอะไรบ้าง' },
+    { label: '👨‍💼 ติดต่อเจ้าหน้าที่', text: 'ขอคุยกับเจ้าหน้าที่' },
+  ];
+
+  const items = (quickReplies || defaultReplies).map(qr => ({
+    type: 'action',
+    action: { type: 'message', label: qr.label.slice(0, 20), text: qr.text },
+  }));
+
+  return {
+    type: 'text',
+    text,
+    quickReply: { items },
+  };
+}
+
+/**
+ * Build a welcome message for new friends (follow event)
+ */
+export function lineWelcomeMessage(displayName?: string) {
+  const name = displayName || 'คุณลูกค้า';
+  return lineTextWithQuickReply(
+    `สวัสดีค่ะ ${name} 🎉\nขอบคุณที่เพิ่มเป็นเพื่อนนะคะ!\n\nมีอะไรให้ช่วยได้บ้างคะ? เลือกจากเมนูด้านล่างหรือพิมพ์ข้อความได้เลยค่ะ 😊`
+  );
+}
+
+/**
+ * Wrap reply with Quick Reply buttons (for bot auto-reply)
+ */
+export function lineBotReplyMessage(text: string) {
+  return lineTextWithQuickReply(text, [
+    { label: '📋 สมัครสมาชิก',    text: 'สนใจสมัครสมาชิก' },
+    { label: '🎁 โปรโมชั่น',      text: 'โปรโมชั่นมีอะไรบ้าง' },
+    { label: '❓ ถามเพิ่ม',        text: 'มีคำถามเพิ่มเติม' },
+    { label: '👨‍💼 คุยกับเจ้าหน้าที่', text: 'ขอคุยกับเจ้าหน้าที่' },
+  ]);
+}

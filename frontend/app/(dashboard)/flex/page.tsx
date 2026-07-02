@@ -7,75 +7,95 @@ import api from '../../../lib/api';
 const PRESET_TEMPLATES = [
   {
     id: 'welcome', category: 'welcome', name: '🎉 Welcome สมาชิกใหม่',
-    altText: 'ยินดีต้อนรับสู่มหาเฮง!',
+    altText: 'ยินดีต้อนรับสู่ Happy77!',
     flexJson: {
       type: 'bubble', size: 'mega',
-      hero: { type: 'image', url: 'https://placehold.co/800x400/1A2540/00D4AA?text=MAHAHENG', size: 'full', aspectRatio: '2:1', aspectMode: 'cover' },
+      styles: {
+        header: { backgroundColor: '#0D0D1A' },
+        body: { backgroundColor: '#0D0D1A' },
+        footer: { backgroundColor: '#0A0A15' },
+      },
       body: {
-        type: 'box', layout: 'vertical', spacing: 'md', paddingAll: '20px',
+        type: 'box', layout: 'vertical', spacing: 'md', paddingAll: '24px',
         contents: [
-          { type: 'text', text: '🎉 ยินดีต้อนรับ!', weight: 'bold', size: 'xl', color: '#00D4AA' },
-          { type: 'text', text: 'สมาชิกมหาเฮง', weight: 'bold', size: 'xxl', color: '#F1F5F9', margin: 'sm' },
-          { type: 'separator', margin: 'md' },
+          { type: 'box', layout: 'vertical', paddingAll: '16px', cornerRadius: '16px', backgroundColor: '#1A1A3E',
+            contents: [
+              { type: 'text', text: '🎉', size: 'xxl', align: 'center' },
+              { type: 'text', text: 'WELCOME', weight: 'bold', size: 'xxl', color: '#00E5A0', align: 'center', margin: 'sm' },
+              { type: 'text', text: 'สมาชิก Happy77', weight: 'bold', size: 'lg', color: '#FFFFFF', align: 'center', margin: 'xs' },
+            ],
+          },
+          { type: 'separator', margin: 'lg', color: '#2A2A5A' },
           { type: 'box', layout: 'vertical', margin: 'md', spacing: 'sm', contents: [
             { type: 'box', layout: 'horizontal', contents: [
-              { type: 'text', text: '✅', size: 'sm', flex: 0 },
-              { type: 'text', text: 'ฝาก-ถอน รวดเร็วทันใจ', size: 'sm', color: '#94A3B8', margin: 'md' },
+              { type: 'text', text: '💎', size: 'sm', flex: 0 },
+              { type: 'text', text: 'ฝาก-ถอน รวดเร็วทันใจ', size: 'sm', color: '#A5B4FC', margin: 'md' },
             ]},
             { type: 'box', layout: 'horizontal', contents: [
-              { type: 'text', text: '✅', size: 'sm', flex: 0 },
-              { type: 'text', text: 'รองรับทุกธนาคาร', size: 'sm', color: '#94A3B8', margin: 'md' },
+              { type: 'text', text: '🔒', size: 'sm', flex: 0 },
+              { type: 'text', text: 'ปลอดภัย รองรับทุกธนาคาร', size: 'sm', color: '#A5B4FC', margin: 'md' },
             ]},
             { type: 'box', layout: 'horizontal', contents: [
-              { type: 'text', text: '✅', size: 'sm', flex: 0 },
-              { type: 'text', text: 'โบนัสต้อนรับ 100%', size: 'sm', color: '#94A3B8', margin: 'md' },
+              { type: 'text', text: '🎁', size: 'sm', flex: 0 },
+              { type: 'text', text: 'โบนัสต้อนรับ 100%', size: 'sm', color: '#34D399', margin: 'md' },
             ]},
           ]},
         ],
       },
       footer: {
-        type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '12px',
+        type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '14px',
         contents: [
-          { type: 'button', style: 'primary', color: '#00D4AA', height: 'sm',
-            action: { type: 'uri', label: '🎮 เข้าเล่นเลย', uri: 'https://mahaheng.com' } },
-          { type: 'button', style: 'secondary', height: 'sm',
-            action: { type: 'uri', label: '📞 ติดต่อแอดมิน', uri: 'https://line.me/R/ti/p/@mahaheng' } },
+          { type: 'button', style: 'primary', color: '#6366F1', height: 'sm',
+            action: { type: 'uri', label: '✈️ เข้ากลุ่มTelegram18+', uri: 'https://t.me/+1T2Dx5EQcEQ3Nzll' } },
+          { type: 'button', style: 'primary', color: '#10B981', height: 'sm',
+            action: { type: 'uri', label: '🎮 เข้าเล่นเกมส์', uri: 'https://happy77.app' } },
         ],
       },
     },
   },
   {
     id: 'promotion', category: 'promotion', name: '🎁 โปรโมชั่นพิเศษ',
-    altText: 'โปรโมชั่นพิเศษจากมหาเฮง!',
+    altText: 'โปรโมชั่นพิเศษจาก Happy77!',
     flexJson: {
       type: 'bubble', size: 'mega',
-      hero: { type: 'image', url: 'https://placehold.co/800x400/FF6B35/FFFFFF?text=BONUS+100%25', size: 'full', aspectRatio: '2:1', aspectMode: 'cover' },
+      styles: {
+        body: { backgroundColor: '#0F0A1E' },
+        footer: { backgroundColor: '#0A0715' },
+      },
       body: {
-        type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '20px',
+        type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '24px',
         contents: [
-          { type: 'text', text: '🔥 โปรโมชั่นพิเศษ', weight: 'bold', size: 'lg', color: '#F59E0B' },
-          { type: 'text', text: 'ฝากวันนี้รับโบนัส 100%', weight: 'bold', size: 'xxl', color: '#F1F5F9', margin: 'sm', wrap: true },
-          { type: 'text', text: 'สูงสุด 500 บาท • วันนี้วันเดียวเท่านั้น!', size: 'sm', color: '#94A3B8', margin: 'sm', wrap: true },
-          { type: 'separator', margin: 'md' },
+          { type: 'box', layout: 'vertical', paddingAll: '20px', cornerRadius: '16px', backgroundColor: '#2D1B69',
+            contents: [
+              { type: 'text', text: '🔥 BONUS 100%', weight: 'bold', size: 'xxl', color: '#FBBF24', align: 'center' },
+              { type: 'text', text: 'ฝากวันนี้รับโบนัสทันที!', weight: 'bold', size: 'md', color: '#E2E8F0', align: 'center', margin: 'sm' },
+            ],
+          },
+          { type: 'text', text: 'สูงสุด 500 บาท • วันนี้วันเดียวเท่านั้น!', size: 'sm', color: '#FB923C', margin: 'md', align: 'center', wrap: true },
+          { type: 'separator', margin: 'md', color: '#3B2877' },
           { type: 'box', layout: 'horizontal', margin: 'md', contents: [
-            { type: 'box', layout: 'vertical', flex: 1, contents: [
-              { type: 'text', text: 'ฝากขั้นต่ำ', size: 'xs', color: '#64748B' },
-              { type: 'text', text: '฿100', size: 'xl', weight: 'bold', color: '#10B981' },
-            ]},
-            { type: 'separator' },
-            { type: 'box', layout: 'vertical', flex: 1, contents: [
-              { type: 'text', text: 'รับโบนัสสูงสุด', size: 'xs', color: '#64748B' },
-              { type: 'text', text: '฿500', size: 'xl', weight: 'bold', color: '#EF4444' },
-            ]},
+            { type: 'box', layout: 'vertical', flex: 1, paddingAll: '12px', cornerRadius: '12px', backgroundColor: '#1E1245',
+              contents: [
+                { type: 'text', text: 'ฝากขั้นต่ำ', size: 'xxs', color: '#818CF8', align: 'center' },
+                { type: 'text', text: '฿100', size: 'xl', weight: 'bold', color: '#34D399', align: 'center' },
+              ],
+            },
+            { type: 'box', layout: 'vertical', flex: 0, width: '8px', contents: [] },
+            { type: 'box', layout: 'vertical', flex: 1, paddingAll: '12px', cornerRadius: '12px', backgroundColor: '#1E1245',
+              contents: [
+                { type: 'text', text: 'โบนัสสูงสุด', size: 'xxs', color: '#818CF8', align: 'center' },
+                { type: 'text', text: '฿500', size: 'xl', weight: 'bold', color: '#F472B6', align: 'center' },
+              ],
+            },
           ]},
         ],
       },
       footer: {
-        type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '12px',
+        type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '14px',
         contents: [
-          { type: 'button', style: 'primary', color: '#F59E0B', height: 'sm',
-            action: { type: 'uri', label: '💰 รับโบนัสเลย', uri: 'https://mahaheng.com/deposit' } },
-          { type: 'text', text: '* เงื่อนไขเป็นไปตามที่บริษัทกำหนด', size: 'xxs', color: '#64748B', margin: 'sm', align: 'center' },
+          { type: 'button', style: 'primary', color: '#8B5CF6', height: 'sm',
+            action: { type: 'uri', label: '✈️ เข้ากลุ่มTelegram18+', uri: 'https://t.me/+1T2Dx5EQcEQ3Nzll' } },
+          { type: 'text', text: '* เงื่อนไขเป็นไปตามที่บริษัทกำหนด', size: 'xxs', color: '#6366F1', margin: 'sm', align: 'center' },
         ],
       },
     },
@@ -85,40 +105,47 @@ const PRESET_TEMPLATES = [
     altText: 'ยินดีด้วย! คุณได้รับสถานะ VIP',
     flexJson: {
       type: 'bubble', size: 'mega',
+      styles: {
+        body: { backgroundColor: '#0A0A18' },
+        footer: { backgroundColor: '#080812' },
+      },
       body: {
         type: 'box', layout: 'vertical', spacing: 'md', paddingAll: '24px',
-        backgroundColor: '#1A1A2E',
         contents: [
-          { type: 'box', layout: 'horizontal', contents: [
-            { type: 'text', text: '⭐', size: 'xxl', flex: 0 },
-            { type: 'box', layout: 'vertical', flex: 1, margin: 'md', contents: [
-              { type: 'text', text: 'VIP MEMBER', weight: 'bold', size: 'sm', color: '#F59E0B' },
-              { type: 'text', text: 'ยินดีด้วย!', weight: 'bold', size: 'xxl', color: '#FFFFFF' },
-            ]},
-          ]},
-          { type: 'text', text: 'คุณได้รับการอัพเกรดเป็นสมาชิก VIP แล้ว รับสิทธิประโยชน์พิเศษมากมาย', size: 'sm', color: '#94A3B8', margin: 'md', wrap: true },
-          { type: 'separator', margin: 'xl', color: '#2A2A4A' },
-          { type: 'box', layout: 'vertical', margin: 'md', spacing: 'sm', contents: [
-            { type: 'box', layout: 'horizontal', contents: [
-              { type: 'text', text: '🎁', size: 'sm', flex: 0 },
-              { type: 'text', text: 'โบนัส VIP พิเศษทุกยอดฝาก', size: 'sm', color: '#F59E0B', margin: 'md' },
-            ]},
-            { type: 'box', layout: 'horizontal', contents: [
-              { type: 'text', text: '💎', size: 'sm', flex: 0 },
-              { type: 'text', text: 'สายตรง VIP แอดมิน 24 ชม.', size: 'sm', color: '#F59E0B', margin: 'md' },
-            ]},
-            { type: 'box', layout: 'horizontal', contents: [
-              { type: 'text', text: '🏆', size: 'sm', flex: 0 },
-              { type: 'text', text: 'เข้าร่วมกิจกรรมพิเศษก่อนใคร', size: 'sm', color: '#F59E0B', margin: 'md' },
-            ]},
-          ]},
+          { type: 'box', layout: 'vertical', paddingAll: '20px', cornerRadius: '16px', backgroundColor: '#1C1333',
+            contents: [
+              { type: 'box', layout: 'horizontal', justifyContent: 'center', contents: [
+                { type: 'text', text: '👑', size: 'xxl', flex: 0 },
+              ]},
+              { type: 'text', text: 'VIP MEMBER', weight: 'bold', size: 'xs', color: '#FBBF24', align: 'center', margin: 'sm' },
+              { type: 'text', text: 'ยินดีด้วย!', weight: 'bold', size: 'xxl', color: '#FFFFFF', align: 'center', margin: 'xs' },
+            ],
+          },
+          { type: 'text', text: 'คุณได้รับการอัพเกรดเป็นสมาชิก VIP แล้ว', size: 'sm', color: '#C4B5FD', margin: 'md', wrap: true, align: 'center' },
+          { type: 'separator', margin: 'lg', color: '#2A1F50' },
+          { type: 'box', layout: 'vertical', margin: 'md', spacing: 'sm', paddingAll: '14px', cornerRadius: '12px', backgroundColor: '#1A1230',
+            contents: [
+              { type: 'box', layout: 'horizontal', contents: [
+                { type: 'text', text: '💰', size: 'sm', flex: 0 },
+                { type: 'text', text: 'โบนัส VIP พิเศษทุกยอดฝาก', size: 'sm', color: '#FDE68A', margin: 'md' },
+              ]},
+              { type: 'box', layout: 'horizontal', contents: [
+                { type: 'text', text: '⚡', size: 'sm', flex: 0 },
+                { type: 'text', text: 'สายตรง VIP แอดมิน 24 ชม.', size: 'sm', color: '#FDE68A', margin: 'md' },
+              ]},
+              { type: 'box', layout: 'horizontal', contents: [
+                { type: 'text', text: '🏆', size: 'sm', flex: 0 },
+                { type: 'text', text: 'เข้าร่วมกิจกรรมพิเศษก่อนใคร', size: 'sm', color: '#FDE68A', margin: 'md' },
+              ]},
+            ],
+          },
         ],
       },
       footer: {
-        type: 'box', layout: 'vertical', paddingAll: '12px',
+        type: 'box', layout: 'vertical', paddingAll: '14px', spacing: 'sm',
         contents: [
-          { type: 'button', style: 'primary', color: '#F59E0B', height: 'sm',
-            action: { type: 'uri', label: '💎 เข้าสู่ระบบ VIP', uri: 'https://mahaheng.com' } },
+          { type: 'button', style: 'primary', color: '#D97706', height: 'sm',
+            action: { type: 'uri', label: '✈️ เข้ากลุ่มTelegram18+', uri: 'https://t.me/+1T2Dx5EQcEQ3Nzll' } },
         ],
       },
     },
@@ -128,28 +155,38 @@ const PRESET_TEMPLATES = [
     altText: 'สุขสันต์วันเกิด! ของขวัญพิเศษรอคุณอยู่',
     flexJson: {
       type: 'bubble', size: 'mega',
+      styles: {
+        body: { backgroundColor: '#10061A' },
+        footer: { backgroundColor: '#0B0414' },
+      },
       body: {
         type: 'box', layout: 'vertical', spacing: 'md', paddingAll: '24px',
         contents: [
-          { type: 'text', text: '🎂', size: 'xxl', align: 'center' },
-          { type: 'text', text: 'Happy Birthday!', weight: 'bold', size: 'xxl', color: '#FF6B6B', align: 'center', margin: 'md' },
-          { type: 'text', text: 'สุขสันต์วันเกิดนะคะ 🎉', size: 'lg', color: '#F1F5F9', align: 'center' },
-          { type: 'text', text: 'ขอให้มีความสุขมากๆ และโชคดีตลอดปี!', size: 'sm', color: '#94A3B8', align: 'center', margin: 'sm', wrap: true },
-          { type: 'separator', margin: 'xl' },
-          { type: 'box', layout: 'vertical', margin: 'md', paddingAll: '16px',
-            backgroundColor: '#FF6B6B18', cornerRadius: '12px',
+          { type: 'box', layout: 'vertical', paddingAll: '20px', cornerRadius: '20px', backgroundColor: '#2D1044',
             contents: [
-              { type: 'text', text: '🎁 ของขวัญวันเกิดสุดพิเศษ', weight: 'bold', size: 'md', color: '#FF6B6B', align: 'center' },
-              { type: 'text', text: 'โบนัสพิเศษ 50% วันนี้วันเดียว', size: 'sm', color: '#94A3B8', align: 'center', margin: 'sm' },
+              { type: 'text', text: '🎂', size: 'xxl', align: 'center' },
+              { type: 'text', text: 'Happy Birthday!', weight: 'bold', size: 'xxl', color: '#F9A8D4', align: 'center', margin: 'md' },
+              { type: 'text', text: 'สุขสันต์วันเกิดนะคะ 🎉', size: 'md', color: '#E9D5FF', align: 'center', margin: 'xs' },
+            ],
+          },
+          { type: 'text', text: 'ขอให้มีความสุขมากๆ และโชคดีตลอดปี!', size: 'sm', color: '#A78BFA', align: 'center', margin: 'md', wrap: true },
+          { type: 'separator', margin: 'lg', color: '#3B1D64' },
+          { type: 'box', layout: 'vertical', margin: 'md', paddingAll: '16px',
+            backgroundColor: '#3B1D64', cornerRadius: '14px',
+            contents: [
+              { type: 'text', text: '🎁 ของขวัญวันเกิดสุดพิเศษ', weight: 'bold', size: 'md', color: '#F472B6', align: 'center' },
+              { type: 'text', text: 'โบนัสพิเศษ 50% วันนี้วันเดียว', size: 'sm', color: '#D8B4FE', align: 'center', margin: 'sm' },
             ],
           },
         ],
       },
       footer: {
-        type: 'box', layout: 'vertical', paddingAll: '12px',
+        type: 'box', layout: 'vertical', paddingAll: '14px', spacing: 'sm',
         contents: [
-          { type: 'button', style: 'primary', color: '#FF6B6B', height: 'sm',
-            action: { type: 'uri', label: '🎁 รับของขวัญเลย', uri: 'https://mahaheng.com' } },
+          { type: 'button', style: 'primary', color: '#EC4899', height: 'sm',
+            action: { type: 'uri', label: '🎁 รับของขวัญเลย', uri: 'https://t.me/+1T2Dx5EQcEQ3Nzll' } },
+          { type: 'button', style: 'primary', color: '#7C3AED', height: 'sm',
+            action: { type: 'uri', label: '✈️ เข้ากลุ่มTelegram18+', uri: 'https://t.me/+1T2Dx5EQcEQ3Nzll' } },
         ],
       },
     },
@@ -159,30 +196,39 @@ const PRESET_TEMPLATES = [
     altText: 'เราคิดถึงคุณ! มีของขวัญรออยู่',
     flexJson: {
       type: 'bubble', size: 'mega',
+      styles: {
+        body: { backgroundColor: '#070B14' },
+        footer: { backgroundColor: '#050810' },
+      },
       body: {
         type: 'box', layout: 'vertical', spacing: 'md', paddingAll: '24px',
         contents: [
-          { type: 'text', text: '💭 เราคิดถึงคุณ...', weight: 'bold', size: 'lg', color: '#7C3AED' },
-          { type: 'text', text: 'กลับมาเล่นกับเรานะคะ!', weight: 'bold', size: 'xxl', color: '#F1F5F9', margin: 'sm', wrap: true },
-          { type: 'text', text: 'ไม่ได้เห็นคุณสักพักแล้ว เราเลยเตรียมโปรพิเศษมาให้', size: 'sm', color: '#94A3B8', margin: 'sm', wrap: true },
-          { type: 'separator', margin: 'xl' },
-          { type: 'box', layout: 'vertical', margin: 'md', paddingAll: '16px',
-            backgroundColor: '#7C3AED18', cornerRadius: '12px',
+          { type: 'box', layout: 'vertical', paddingAll: '20px', cornerRadius: '16px', backgroundColor: '#0F1A3A',
             contents: [
-              { type: 'text', text: '🎯 โปรพิเศษเฉพาะคุณ', weight: 'bold', color: '#7C3AED', align: 'center' },
-              { type: 'text', text: 'ฝากครั้งแรกรับโบนัส 30%', size: 'sm', color: '#94A3B8', align: 'center', margin: 'sm' },
-              { type: 'text', text: 'หมดอายุใน 24 ชั่วโมง!', size: 'xs', color: '#EF4444', align: 'center', margin: 'xs' },
+              { type: 'text', text: '💭', size: 'xxl', align: 'center' },
+              { type: 'text', text: 'เราคิดถึงคุณ...', weight: 'bold', size: 'xl', color: '#60A5FA', align: 'center', margin: 'sm' },
+              { type: 'text', text: 'กลับมาเล่นกับเรานะคะ!', weight: 'bold', size: 'md', color: '#E2E8F0', align: 'center', margin: 'xs', wrap: true },
+            ],
+          },
+          { type: 'text', text: 'ไม่ได้เห็นคุณสักพักแล้ว เราเลยเตรียมโปรพิเศษมาให้', size: 'sm', color: '#93C5FD', margin: 'md', wrap: true, align: 'center' },
+          { type: 'separator', margin: 'lg', color: '#1E3A5F' },
+          { type: 'box', layout: 'vertical', margin: 'md', paddingAll: '16px',
+            backgroundColor: '#0C1F42', cornerRadius: '14px',
+            contents: [
+              { type: 'text', text: '🎯 โปรพิเศษเฉพาะคุณ', weight: 'bold', color: '#38BDF8', align: 'center' },
+              { type: 'text', text: 'ฝากครั้งแรกรับโบนัส 30%', size: 'sm', color: '#BAE6FD', align: 'center', margin: 'sm' },
+              { type: 'text', text: '⏰ หมดอายุใน 24 ชั่วโมง!', size: 'xs', color: '#FB7185', align: 'center', margin: 'xs' },
             ],
           },
         ],
       },
       footer: {
-        type: 'box', layout: 'vertical', paddingAll: '12px', spacing: 'sm',
+        type: 'box', layout: 'vertical', paddingAll: '14px', spacing: 'sm',
         contents: [
-          { type: 'button', style: 'primary', color: '#7C3AED', height: 'sm',
-            action: { type: 'uri', label: '🔙 กลับมาเล่นเลย', uri: 'https://mahaheng.com' } },
-          { type: 'button', style: 'secondary', height: 'sm',
-            action: { type: 'uri', label: '📞 คุยกับแอดมิน', uri: 'https://line.me/R/ti/p/@mahaheng' } },
+          { type: 'button', style: 'primary', color: '#2563EB', height: 'sm',
+            action: { type: 'uri', label: '✈️ เข้ากลุ่มTelegram18+', uri: 'https://t.me/+1T2Dx5EQcEQ3Nzll' } },
+          { type: 'button', style: 'primary', color: '#0EA5E9', height: 'sm',
+            action: { type: 'uri', label: '🎮 เข้าเล่นเกมส์', uri: 'https://happy77.app' } },
         ],
       },
     },
@@ -284,6 +330,36 @@ export default function FlexBuilderPage() {
   const [bldJson, setBldJson]       = useState('');
   const [bldParsed, setBldParsed]   = useState<any>(null);
   const [jsonError, setJsonError]   = useState('');
+  const [uploadedImages, setUploadedImages] = useState<{ url: string; filename: string }[]>([]);
+
+  // Image upload handler
+  const handleImageUpload = async (file: File) => {
+    const tid = toast.loading('กำลังอัปโหลด...');
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      const r = await api.post('/upload/image', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (r.data.success) {
+        toast.success('✅ อัปโหลดสำเร็จ', { id: tid });
+        setUploadedImages(prev => [{ url: r.data.url, filename: r.data.filename }, ...prev]);
+        insertHeroImage(r.data.url);
+      }
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || 'อัปโหลดไม่สำเร็จ', { id: tid });
+    }
+  };
+
+  // Insert hero image into flex JSON
+  const insertHeroImage = (url: string) => {
+    try {
+      let json = bldParsed ? { ...bldParsed } : { type: 'bubble', size: 'mega', body: { type: 'box', layout: 'vertical', contents: [{ type: 'text', text: 'ข้อความ', weight: 'bold', size: 'xl', color: '#FFFFFF' }] } };
+      json.hero = { type: 'image', url, size: 'full', aspectRatio: '20:13', aspectMode: 'cover' };
+      const jsonStr = JSON.stringify(json, null, 2);
+      setBldJson(jsonStr);
+      setBldParsed(json);
+      toast.success('🖼️ ใส่รูป Hero Image แล้ว');
+    } catch { toast.error('ไม่สามารถใส่รูปได้'); }
+  };
 
   // Send modal
   const [showSend, setShowSend]     = useState(false);
@@ -291,6 +367,16 @@ export default function FlexBuilderPage() {
   const [sendConvId, setSendConvId] = useState('');
   const [sendCids, setSendCids]     = useState<string[]>([]);
   const [sending, setSending]       = useState(false);
+
+  const lineContacts = contacts.filter((c: any) => c.lineUserId);
+  const isAllSelected = lineContacts.length > 0 && lineContacts.every((c: any) => sendCids.includes(c.id));
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSendCids(lineContacts.map((c: any) => c.id));
+    } else {
+      setSendCids([]);
+    }
+  };
 
   const loadSaved = useCallback(async () => {
     try { const r = await api.get('/flex/templates'); setSavedTemplates(r.data.templates || []); } catch {}
@@ -300,7 +386,7 @@ export default function FlexBuilderPage() {
     try {
       const [cr, ccr] = await Promise.all([
         api.get('/contacts', { params: { limit: 200 } }),
-        api.get('/conversations', { params: { status: 'open', channel: 'line', limit: 100 } }),
+        api.get('/conversations', { params: { channel: 'line', limit: 200 } }),
       ]);
       setContacts(cr.data.contacts || []);
       setConversations(ccr.data.conversations || []);
@@ -461,6 +547,85 @@ export default function FlexBuilderPage() {
                   </div>
                 </div>
 
+                {/* ── Image Builder ─────────────────────────────── */}
+                <div style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 16, background: 'var(--bg-tertiary)', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <span style={{ fontWeight: 700, fontSize: '0.85rem' }}>🖼️ Hero Image</span>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>อัปโหลดหรือวาง URL รูปภาพ</span>
+                  </div>
+
+                  {/* URL Input */}
+                  <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                    <input className="input" style={{ flex: 1, fontSize: '0.8rem' }}
+                      placeholder="https://example.com/image.jpg"
+                      id="hero-url-input"
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          const url = (e.target as HTMLInputElement).value.trim();
+                          if (!url) return;
+                          insertHeroImage(url);
+                        }
+                      }}
+                    />
+                    <button className="btn btn-secondary btn-sm" style={{ whiteSpace: 'nowrap', fontSize: '0.75rem' }}
+                      onClick={() => {
+                        const inp = document.getElementById('hero-url-input') as HTMLInputElement;
+                        if (inp?.value.trim()) insertHeroImage(inp.value.trim());
+                      }}>
+                      🔗 ใส่ URL
+                    </button>
+                  </div>
+
+                  {/* Upload area */}
+                  <div
+                    style={{
+                      border: '2px dashed var(--border)', borderRadius: 10, padding: 20, textAlign: 'center',
+                      cursor: 'pointer', transition: 'all 0.2s', background: 'var(--bg-secondary)',
+                    }}
+                    onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = 'var(--teal)'; e.currentTarget.style.background = 'rgba(0,212,170,0.05)'; }}
+                    onDragLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--bg-secondary)'; }}
+                    onDrop={async e => {
+                      e.preventDefault();
+                      e.currentTarget.style.borderColor = 'var(--border)';
+                      e.currentTarget.style.background = 'var(--bg-secondary)';
+                      const file = e.dataTransfer.files[0];
+                      if (file) await handleImageUpload(file);
+                    }}
+                    onClick={() => {
+                      const inp = document.createElement('input');
+                      inp.type = 'file'; inp.accept = 'image/*';
+                      inp.onchange = async () => { if (inp.files?.[0]) await handleImageUpload(inp.files[0]); };
+                      inp.click();
+                    }}
+                  >
+                    <div style={{ fontSize: '1.8rem', marginBottom: 6 }}>📤</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>คลิกเลือกไฟล์ หรือ ลากวางรูปภาพ</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 4 }}>รองรับ JPG, PNG, GIF, WebP (สูงสุด 5MB)</div>
+                  </div>
+
+                  {/* Recently uploaded gallery */}
+                  {uploadedImages.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6 }}>📁 รูปที่อัปโหลดแล้ว:</div>
+                      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+                        {uploadedImages.map((img, i) => (
+                          <div key={i} onClick={() => insertHeroImage(img.url)}
+                            style={{
+                              minWidth: 80, height: 60, borderRadius: 8, cursor: 'pointer', overflow: 'hidden',
+                              border: '2px solid var(--border)', transition: 'all 0.2s', flexShrink: 0,
+                            }}
+                            onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--teal)')}
+                            onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+                            title="คลิกเพื่อใส่เป็น Hero Image"
+                          >
+                            <img src={img.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="form-group">
                   <label className="label" style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Flex JSON <span style={{ color: 'var(--danger)' }}>*</span></span>
@@ -615,20 +780,27 @@ export default function FlexBuilderPage() {
                     <option key={c.id} value={c.id}>{c.contact?.displayName || c.channelId} ({c.status})</option>
                   ))}
                 </select>
-                {conversations.length === 0 && <div style={{ fontSize: '0.75rem', color: 'var(--warning)', marginTop: 4 }}>ไม่พบบทสนทนา LINE ที่เปิดอยู่</div>}
+                {conversations.length === 0 && <div style={{ fontSize: '0.75rem', color: 'var(--warning)', marginTop: 4 }}>ไม่พบบทสนทนา LINE</div>}
               </div>
             ) : (
               <div className="form-group">
                 <label className="label">เลือกลูกค้า (มี LINE ID) — เลือกได้หลายคน</label>
                 <div style={{ maxHeight: 200, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
-                  {contacts.filter((c: any) => c.lineUserId).map((c: any) => (
+                  {lineContacts.length > 0 && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', borderBottom: '2px solid var(--border)', fontSize: '0.82rem', fontWeight: 'bold', background: 'rgba(255,255,255,0.05)' }}>
+                      <input type="checkbox" checked={isAllSelected}
+                        onChange={e => handleSelectAll(e.target.checked)} />
+                      เลือกทั้งหมด ({lineContacts.length} คน)
+                    </label>
+                  )}
+                  {lineContacts.map((c: any) => (
                     <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)', fontSize: '0.82rem' }}>
                       <input type="checkbox" checked={sendCids.includes(c.id)}
                         onChange={e => setSendCids(prev => e.target.checked ? [...prev, c.id] : prev.filter(i => i !== c.id))} />
                       {c.displayName}
                     </label>
                   ))}
-                  {contacts.filter((c: any) => c.lineUserId).length === 0 && (
+                  {lineContacts.length === 0 && (
                     <div style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>ไม่มีลูกค้าที่มี LINE ID</div>
                   )}
                 </div>

@@ -25,7 +25,7 @@ async function seed() {
   // Demo Tenant
   const demoTenant = await prisma.tenant.upsert({
     where: { slug: 'demo' },
-    create: { name: 'มหาเฮง Demo', slug: 'demo', plan: 'pro' },
+    create: { name: 'Happy77 Demo', slug: 'demo', plan: 'pro' },
     update: {},
   });
 
@@ -45,26 +45,27 @@ async function seed() {
     update: {},
   });
 
-  // Bot Config
-  await prisma.botConfig.upsert({
-    where: { tenantId: demoTenant.id },
-    create: {
-      tenantId: demoTenant.id,
-      name: 'AI Bot มหาเฮง',
-      systemPrompt: 'คุณเป็น AI Assistant ของมหาเฮง พร้อมช่วยเหลือลูกค้าด้วยความเป็นมิตรและมืออาชีพ ตอบภาษาไทยเสมอ',
-      model: 'gpt-4o',
-      temperature: 0.7,
-      isActive: true,
-      knowledgeBase: {
-        create: [
-          { question: 'เวลาทำการ', answer: 'เราเปิดทำการวันจันทร์-ศุกร์ เวลา 9:00-18:00 น.' },
-          { question: 'ติดต่อได้อย่างไร', answer: 'ติดต่อได้ผ่าน LINE @mahaheng หรือโทร 02-xxx-xxxx' },
-          { question: 'มีสินค้าอะไรบ้าง', answer: 'เรามีสินค้าหลากหลาย กรุณาเยี่ยมชมเว็บไซต์ของเราหรือสอบถามเพิ่มเติมได้เลยค่ะ' },
-        ],
+  // Bot Config (per-company now — สร้างถ้ายังไม่มีของ tenant นี้)
+  const existingBot = await prisma.botConfig.findFirst({ where: { tenantId: demoTenant.id } });
+  if (!existingBot) {
+    await prisma.botConfig.create({
+      data: {
+        tenantId: demoTenant.id,
+        name: 'AI Bot Happy77',
+        systemPrompt: 'คุณเป็น AI Assistant ของ Happy77 พร้อมช่วยเหลือลูกค้าด้วยความเป็นมิตรและมืออาชีพ ตอบภาษาไทยเสมอ',
+        model: 'gpt-4o',
+        temperature: 0.7,
+        isActive: true,
+        knowledgeBase: {
+          create: [
+            { question: 'เวลาทำการ', answer: 'เราเปิดทำการวันจันทร์-ศุกร์ เวลา 9:00-18:00 น.' },
+            { question: 'ติดต่อได้อย่างไร', answer: 'ติดต่อได้ผ่าน LINE @mahaheng หรือโทร 02-xxx-xxxx' },
+            { question: 'มีสินค้าอะไรบ้าง', answer: 'เรามีสินค้าหลากหลาย กรุณาเยี่ยมชมเว็บไซต์ของเราหรือสอบถามเพิ่มเติมได้เลยค่ะ' },
+          ],
+        },
       },
-    },
-    update: {},
-  });
+    });
+  }
 
   // Demo contacts
   const contact1 = await prisma.contact.upsert({

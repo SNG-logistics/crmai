@@ -1,0 +1,15 @@
+{
+  "name": "crm-happy77-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CRM Happy77 + lufy.cc — รันทุกอย่างด้วยคำสั่งเดียว",
+  "scripts": {
+    "dev": "concurrently -k -n crm-api,crm-web,lufy-api,lufy-web -c green,cyan,yellow,magenta \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\" \"npm --prefix modules/lufy/backend run dev\" \"npm --prefix modules/lufy/frontend run dev\"",
+    "dev:crm": "concurrently -k -n crm-api,crm-web -c green,cyan \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
+    "build": "npm --prefix backend run build && npm --prefix frontend run build && npm --prefix modules/lufy/backend run build && npm --prefix modules/lufy/frontend run build",
+    "install:all": "npm install && npm --prefix backend install && npm --prefix frontend install && npm --prefix modules/lufy/backend install && npm --prefix modules/lufy/frontend install"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

@@ -1,11 +1,22 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
-import { verifyToken } from '../middleware/auth';
+import { verifyToken, requireRole } from '../middleware/auth';
+import { createAuditLog } from '../lib/audit';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
 import fs from 'fs';
+import crypto from 'crypto';
 
 const router = Router();
+
+// ─── Sync API key helpers ─────────────────────────────────────────────────────
+const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest();
+function safeEqual(a: Buffer, b: Buffer): boolean {
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function readSettings(raw: string | null | undefined): any {
+  try { return JSON.parse(raw || '{}') || {}; } catch { return {}; }
+}
 const upload = multer({ dest: 'uploads/tmp/', limits: { fileSize: 20 * 1024 * 1024 } }); // 20MB
 
 // ─── Helper: parse number safely ─────────────────────────────────────────────
@@ -34,18 +45,77 @@ async function finishLog(id: string, stats: { inserted: number; updated: number;
 
 // ─── Middleware: API Key OR JWT ───────────────────────────────────────────────
 // Sync API รองรับทั้ง JWT (Admin ใช้) และ API Key (ระบบเกมใช้)
-function syncAuth(req: Request, res: Response, next: any) {
+//
+// 🔒 SECURITY: x-api-key ต้องตรงกับ key ที่ตั้งไว้ของ tenant นั้น (เทียบ hash แบบ
+//    constant-time) เท่านั้น — จะเชื่อ x-tenant-id ก็ต่อเมื่อ key ผ่านแล้ว
+//    ปิดช่องโหว่เดิมที่ใครส่ง x-api-key อะไรก็ได้ + x-tenant-id ของคนอื่น = เขียนข้อมูลข้าม tenant ได้
+async function syncAuth(req: Request, res: Response, next: any) {
   const apiKey = req.headers['x-api-key'] as string;
   if (apiKey) {
-    // Validate against tenant's API key in settings
-    const tenantHeader = req.headers['x-tenant-id'] as string;
-    if (!tenantHeader) return res.status(400).json({ success: false, message: 'ต้องระบุ x-tenant-id' });
-    req.tenantId = tenantHeader;
-    // TODO: validate apiKey against tenant settings
-    return next();
+    try {
+      const tenantHeader = (req.headers['x-tenant-id'] as string || '').trim();
+      if (!tenantHeader) return res.status(400).json({ success: false, message: 'ต้องระบุ x-tenant-id' });
+
+      const tenant = await prisma.tenant.findUnique({
+        where: { id: tenantHeader },
+        select: { id: true, isActive: true, settings: true },
+      });
+      // ข้อความ error เดียวกันทุกกรณี (กัน enumeration ว่า tenant ไหนมี key)
+      const deny = () => res.status(401).json({ success: false, message: 'invalid tenant or api key' });
+      if (!tenant || !tenant.isActive) return deny();
+
+      const storedHashHex = readSettings(tenant.settings).syncApiKeyHash as string | undefined;
+      if (!storedHashHex) return deny(); // tenant ยังไม่ได้ตั้ง sync API key → ปฏิเสธ (fail closed)
+
+      const ok = safeEqual(sha256(apiKey), Buffer.from(storedHashHex, 'hex'));
+      if (!ok) return deny();
+
+      req.tenantId = tenant.id; // เชื่อ tenant นี้ได้แล้ว เพราะ key ตรง
+      return next();
+    } catch (e: any) {
+      return res.status(401).json({ success: false, message: 'invalid tenant or api key' });
+    }
   }
   return verifyToken(req, res, next);
 }
+
+// ─── Sync API key management (admin/superadmin) ───────────────────────────────
+// GET /api/sync/api-key — สถานะว่าตั้ง key แล้วหรือยัง (ไม่คืนตัว key)
+router.get('/api-key', verifyToken, requireRole('admin', 'superadmin'), async (req: Request, res: Response) => {
+  try {
+    const tenant = await prisma.tenant.findUnique({ where: { id: req.tenantId! }, select: { settings: true } });
+    const s = readSettings(tenant?.settings);
+    return res.json({ success: true, configured: !!s.syncApiKeyHash, setAt: s.syncApiKeySetAt || null });
+  } catch (e: any) { return res.status(500).json({ success: false, message: e.message }); }
+});
+
+// POST /api/sync/api-key/rotate — สร้าง key ใหม่ (คืน plaintext ครั้งเดียว เก็บแต่ hash)
+router.post('/api-key/rotate', verifyToken, requireRole('admin', 'superadmin'), async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.tenantId!;
+    const key = 'sk_' + crypto.randomBytes(24).toString('hex');
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
+    const s = readSettings(tenant?.settings);
+    s.syncApiKeyHash = sha256(key).toString('hex');
+    s.syncApiKeySetAt = new Date().toISOString();
+    await prisma.tenant.update({ where: { id: tenantId }, data: { settings: JSON.stringify(s) } });
+    await createAuditLog(tenantId, req.user!.id, 'SYNC_APIKEY_ROTATE', {}, req.ip, req.headers['user-agent']);
+    return res.json({ success: true, apiKey: key, message: '⚠️ เก็บ key นี้ไว้ให้ดี ระบบจะไม่แสดงอีก' });
+  } catch (e: any) { return res.status(500).json({ success: false, message: e.message }); }
+});
+
+// DELETE /api/sync/api-key — ยกเลิก key (sync ผ่าน API key จะใช้ไม่ได้ทันที)
+router.delete('/api-key', verifyToken, requireRole('admin', 'superadmin'), async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.tenantId!;
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { settings: true } });
+    const s = readSettings(tenant?.settings);
+    delete s.syncApiKeyHash; delete s.syncApiKeySetAt;
+    await prisma.tenant.update({ where: { id: tenantId }, data: { settings: JSON.stringify(s) } });
+    await createAuditLog(tenantId, req.user!.id, 'SYNC_APIKEY_REVOKE', {}, req.ip, req.headers['user-agent']);
+    return res.json({ success: true });
+  } catch (e: any) { return res.status(500).json({ success: false, message: e.message }); }
+});
 
 // ─── GET /api/sync/logs ───────────────────────────────────────────────────────
 router.get('/logs', verifyToken, async (req: Request, res: Response) => {
@@ -88,6 +158,7 @@ router.post('/members', syncAuth, async (req: Request, res: Response) => {
     try {
       if (!m.username) { stats.skipped++; continue; }
       const existing = await prisma.contact.findFirst({ where: { tenantId, username: m.username } });
+      const lineUserId = str(m.lineUserId || m.lineId || m.line_id);
       const data: any = {
         displayName:   str(m.displayName) || m.username,
         firstName:     str(m.firstName),
@@ -105,6 +176,21 @@ router.post('/members', syncAuth, async (req: Request, res: Response) => {
         depositCount:  parseInt(m.depositCount) || 0,
         withdrawCount: parseInt(m.withdrawCount) || 0,
       };
+
+      if (lineUserId) {
+        const duplicateLineUser = await prisma.contact.findFirst({
+          where: {
+            tenantId,
+            lineUserId,
+            NOT: existing ? { id: existing.id } : undefined
+          }
+        });
+        if (duplicateLineUser) {
+          throw new Error(`LINE ID '${lineUserId}' ถูกใช้งานแล้วโดยผู้ใช้อื่น (${duplicateLineUser.username})`);
+        }
+        data.lineUserId = lineUserId;
+      }
+
       if (existing) {
         await prisma.contact.update({ where: { id: existing.id }, data });
         stats.updated++;
@@ -231,6 +317,7 @@ router.post('/csv/members', verifyToken, upload.single('file'), async (req: Requ
         if (!username) { stats.skipped++; continue; }
 
         const existing = await prisma.contact.findFirst({ where: { tenantId, username } });
+        const lineUserId = str(row.lineUserId || row.line || row.LINE_ID || row.line_id || row['ไลน์ไอดี']);
         const data: any = {
           displayName:   str(row.displayName || row.name || row['ชื่อ']) || username,
           phone:         str(row.phone || row['โทรศัพท์']),
@@ -245,6 +332,20 @@ router.post('/csv/members', verifyToken, upload.single('file'), async (req: Requ
           depositCount:  parseInt(row.depositCount || row['จำนวนฝาก'] || '0') || 0,
           withdrawCount: parseInt(row.withdrawCount || row['จำนวนถอน'] || '0') || 0,
         };
+
+        if (lineUserId) {
+          const duplicateLineUser = await prisma.contact.findFirst({
+            where: {
+              tenantId,
+              lineUserId,
+              NOT: existing ? { id: existing.id } : undefined
+            }
+          });
+          if (duplicateLineUser) {
+            throw new Error(`LINE ID '${lineUserId}' ถูกใช้งานแล้วโดยผู้ใช้อื่น (${duplicateLineUser.username})`);
+          }
+          data.lineUserId = lineUserId;
+        }
 
         if (existing) {
           await prisma.contact.update({ where: { id: existing.id }, data });
@@ -379,6 +480,88 @@ router.post('/csv/preview', verifyToken, upload.single('file'), async (req: Requ
   } catch (e: any) {
     try { fs.unlinkSync(req.file.path); } catch {}
     res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// ─── POST /api/sync/line-reply — รับข้อความจาก Chrome Extension ──────────────
+// Extension ส่งมาเมื่อแอดมินตอบใน LINE OA Manager
+// Body: { tenantId, userId, text, timestamp, source }
+router.post('/line-reply', verifyToken, async (req: Request, res: Response) => {
+  const tenantId = req.tenantId!;
+  const { userId, text, timestamp, source } = req.body;
+
+  if (!userId || !text) {
+    return res.status(400).json({ ok: false, reason: 'userId and text are required' });
+  }
+
+  try {
+    // lineUserId อยู่บน Contact — หา Contact ก่อน แล้วหา Conversation จาก contactId
+    const contact = await prisma.contact.findUnique({
+      where: { tenantId_lineUserId: { tenantId, lineUserId: userId } },
+    });
+
+    if (!contact) {
+      return res.status(404).json({ ok: false, reason: 'contact not found for lineUserId: ' + userId });
+    }
+
+    const conversation = await prisma.conversation.findFirst({
+      where: { tenantId, contactId: contact.id },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    if (!conversation) {
+      // ยังไม่มี conversation (ลูกค้ายังไม่เคยส่งข้อความมาก่อน)
+      return res.status(404).json({ ok: false, reason: 'conversation not found for userId: ' + userId });
+    }
+
+    // ตรวจ dedup — ห้ามบันทึกซ้ำภายใน 5 วินาที (content + senderType เหมือนกัน)
+    const fiveSecsAgo = new Date(Date.now() - 5000);
+    const duplicate = await prisma.message.findFirst({
+      where: {
+        conversationId: conversation.id,
+        senderType: 'admin',
+        content: text,
+        createdAt: { gte: fiveSecsAgo },
+      },
+    });
+
+    if (duplicate) {
+      return res.json({ ok: true, duplicate: true, messageId: duplicate.id });
+    }
+
+    // บันทึกข้อความแอดมินลง DB
+    const message = await prisma.message.create({
+      data: {
+        conversationId: conversation.id,
+        tenantId,
+        senderType: 'admin',
+        type: 'text',
+        content: text,
+        createdAt: timestamp ? new Date(timestamp) : new Date(),
+        metadata: JSON.stringify({ source: source || 'extension', syncedAt: new Date().toISOString() }),
+      },
+    });
+
+    // อัปเดต conversation updatedAt
+    await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { updatedAt: new Date() },
+    });
+
+    // Emit real-time ไป CRM Frontend
+    const { emitToTenant } = await import('../lib/socket');
+    emitToTenant(tenantId, 'new_message', {
+      conversationId: conversation.id,
+      message: { ...message, senderType: 'admin' },
+      source: 'line_manager_extension',
+    });
+
+    console.log(`[LINE Sync] Admin reply synced: conv=${conversation.id} text="${text.slice(0, 30)}"`);
+    res.json({ ok: true, messageId: message.id });
+
+  } catch (e: any) {
+    console.error('[LINE Sync] Error saving admin reply:', e.message);
+    res.status(500).json({ ok: false, reason: e.message });
   }
 });
 

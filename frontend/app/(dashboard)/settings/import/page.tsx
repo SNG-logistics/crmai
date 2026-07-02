@@ -28,12 +28,78 @@ function fmtDur(ms?: number) {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+// ─── Sync API Key management ──────────────────────────────────────────────────
+function SyncApiKeyCard() {
+  const [configured, setConfigured] = useState(false);
+  const [setAt, setSetAt] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [newKey, setNewKey] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const r = await api.get('/sync/api-key');
+      setConfigured(!!r.data.configured); setSetAt(r.data.setAt || null);
+    } catch {} finally { setLoading(false); }
+  };
+  useEffect(() => { load(); }, []);
+
+  const rotate = async () => {
+    if (configured && !confirm('สร้าง key ใหม่จะทำให้ key เดิมใช้ไม่ได้ทันที ระบบเกมต้องอัปเดตเป็น key ใหม่ — ยืนยัน?')) return;
+    setBusy(true);
+    try { const r = await api.post('/sync/api-key/rotate'); setNewKey(r.data.apiKey); toast.success('✅ สร้าง key แล้ว'); load(); }
+    catch (e: any) { toast.error(e.response?.data?.message || 'ไม่สำเร็จ'); }
+    finally { setBusy(false); }
+  };
+  const revoke = async () => {
+    if (!confirm('ยกเลิก key นี้? การ sync ผ่าน API key จะใช้ไม่ได้ทันที')) return;
+    setBusy(true);
+    try { await api.delete('/sync/api-key'); setNewKey(null); toast.success('ยกเลิก key แล้ว'); load(); }
+    catch (e: any) { toast.error(e.response?.data?.message || 'ไม่สำเร็จ'); }
+    finally { setBusy(false); }
+  };
+  const copy = () => { if (newKey) { navigator.clipboard?.writeText(newKey); toast.success('📋 คัดลอกแล้ว'); } };
+
+  return (
+    <div style={{ background: 'rgba(0,212,170,0.05)', border: '1px solid rgba(0,212,170,0.2)', borderRadius: 10, padding: '12px 14px' }}>
+      <div style={{ fontWeight: 700, color: 'var(--teal)', marginBottom: 6 }}>🔑 Sync API Key</div>
+      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 10 }}>
+        คีย์ลับสำหรับให้ระบบเกมส่งข้อมูล sync (ใช้เป็น header <code style={{ color: 'var(--teal)' }}>x-api-key</code>) — แสดงครั้งเดียวตอนสร้าง เก็บไว้ให้ดี
+      </div>
+      {loading ? <span className="spinner" style={{ width: 16, height: 16 }} /> : (
+        <>
+          <div style={{ fontSize: '0.82rem', marginBottom: 10 }}>
+            สถานะ:{' '}
+            {configured
+              ? <span style={{ color: 'var(--success)', fontWeight: 600 }}>✅ ตั้งค่าแล้ว{setAt ? ` (${new Date(setAt).toLocaleString('th-TH')})` : ''}</span>
+              : <span style={{ color: 'var(--warning)', fontWeight: 600 }}>⚠️ ยังไม่ได้ตั้ง — sync ผ่าน API key ใช้ไม่ได้จนกว่าจะสร้าง</span>}
+          </div>
+          {newKey && (
+            <div style={{ background: 'var(--bg-tertiary)', border: '1px dashed var(--teal)', borderRadius: 8, padding: '10px 12px', marginBottom: 10 }}>
+              <div style={{ fontSize: '0.72rem', color: 'var(--warning)', marginBottom: 4 }}>⚠️ คัดลอกเก็บไว้เลย — จะไม่แสดงอีก</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <code style={{ flex: 1, fontSize: '0.78rem', color: 'var(--text-primary)', wordBreak: 'break-all' }}>{newKey}</code>
+                <button className="btn btn-secondary btn-sm" onClick={copy}>📋 คัดลอก</button>
+              </div>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-primary btn-sm" onClick={rotate} disabled={busy}>{configured ? '🔄 สร้าง Key ใหม่' : '➕ สร้าง Key'}</button>
+            {configured && <button className="btn btn-danger btn-sm" onClick={revoke} disabled={busy}>🗑️ ยกเลิก Key</button>}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Sample CSV Download ──────────────────────────────────────────────────────
 function downloadSample(type: 'members' | 'transactions') {
-  const members = `username,displayName,phone,email,affiliateCode,memberType,registeredAt,firstDepositAt,totalDeposit,totalWithdraw,depositCount
-user001,สมชาย ใจดี,0812345678,somchai@email.com,AFF001,regular,2026-01-15,2026-01-16,15000,8000,12
-user002,สมหญิง รักไทย,0898765432,,AFF002,new,2026-05-20,,0,0,0
-user003,มานะ ขยัน,0811234567,mana@email.com,AFF001,vip,2025-12-01,2025-12-02,250000,180000,85`;
+  const members = `username,displayName,phone,email,affiliateCode,memberType,registeredAt,firstDepositAt,totalDeposit,totalWithdraw,depositCount,lineUserId
+user001,สมชาย ใจดี,0812345678,somchai@email.com,AFF001,regular,2026-01-15,2026-01-16,15000,8000,12,U1234567890abcdef
+user002,สมหญิง รักไทย,0898765432,,AFF002,new,2026-05-20,,0,0,0,
+user003,มานะ ขยัน,0811234567,mana@email.com,AFF001,vip,2025-12-01,2025-12-02,250000,180000,85,U9999999999abcdef`;
 
   const transactions = `username,type,amount,date,gameType
 user001,deposit,1000,2026-05-01,slot
@@ -123,7 +189,7 @@ function CSVImporter({ type }: { type: 'members' | 'transactions' }) {
         <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--teal)', marginBottom: 6 }}>📋 คอลัมน์ที่รองรับ</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 8px' }}>
           {(isMembers
-            ? ['username *', 'displayName', 'phone', 'email', 'affiliateCode', 'memberType', 'registeredAt', 'firstDepositAt', 'totalDeposit', 'totalWithdraw', 'depositCount']
+            ? ['username *', 'displayName', 'phone', 'email', 'affiliateCode', 'memberType', 'registeredAt', 'firstDepositAt', 'totalDeposit', 'totalWithdraw', 'depositCount', 'lineUserId']
             : ['username *', 'type * (deposit/withdraw)', 'amount *', 'date * (YYYY-MM-DD)', 'gameType']
           ).map(c => (
             <span key={c} style={{ fontSize: '0.72rem', background: 'var(--bg-tertiary)', borderRadius: 4, padding: '2px 7px', border: '1px solid var(--border)', color: c.includes('*') ? 'var(--teal)' : 'var(--text-muted)', fontFamily: 'monospace' }}>
@@ -269,7 +335,7 @@ function APITester() {
       <div>
         <h3 style={{ margin: 0, fontWeight: 700 }}>🔌 ทดสอบ API Sync</h3>
         <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-          ระบบเกมมหาเฮงสามารถส่งข้อมูลมาได้ที่ endpoint เหล่านี้
+          ระบบเกม Happy77 สามารถส่งข้อมูลมาได้ที่ endpoint เหล่านี้
         </p>
       </div>
 
@@ -297,6 +363,9 @@ function APITester() {
           หรือใช้ JWT Token ปกติ: <code style={{ color: 'var(--teal)' }}>Authorization: Bearer TOKEN</code>
         </div>
       </div>
+
+      {/* Sync API Key management */}
+      <SyncApiKeyCard />
 
       {/* Tester */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

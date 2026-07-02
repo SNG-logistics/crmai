@@ -15,20 +15,26 @@ interface Message {
   type: string; content: string; createdAt: string; isRead: boolean;
   sender?: { id: string; displayName: string; avatar?: string };
   metadata?: any;
+  platformMsgId?: string;
 }
 interface Conversation {
   id: string; channel: string; status: string; isBot: boolean; priority: string;
   lastMessageAt: string; createdAt: string; assignedToId?: string;
-  contact: { id: string; displayName: string; avatar?: string; lineUserId?: string; telegramId?: string; email?: string; phone?: string };
+  contact: { id: string; displayName: string; avatar?: string; lineUserId?: string; telegramId?: string; whatsappId?: string; email?: string; phone?: string };
   assignedTo?: { id: string; displayName: string; avatar?: string };
   messages?: Message[];
   _unread?: number;
 }
 
 // ─── Sound Notification ───────────────────────────────────────────────────────
+// ใช้ AudioContext ตัวเดียวซ้ำ + resume ทุกครั้ง (เบราว์เซอร์ suspend จนกว่าจะมี user gesture)
+let _audioCtx: AudioContext | null = null;
 function playNotificationSound() {
   try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (typeof window === 'undefined') return;
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const ctx = _audioCtx;
+    if (ctx.state === 'suspended') { ctx.resume().catch(() => {}); }
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain); gain.connect(ctx.destination);
@@ -76,32 +82,199 @@ const CANNED = [
   { trigger: '/verify',  text: 'กรุณาส่งเอกสารยืนยันตัวตน (บัตรประชาชน + selfie) เพื่อยืนยันบัญชีนะคะ 📋', category: 'เกม' },
 ];
 
+// ─── Channel helpers (LINE / WhatsApp / Telegram) ────────────────────────────
+const channelColor = (ch?: string) => ch === 'line' ? '#00B900' : ch === 'whatsapp' ? '#25D366' : '#2AABEE';
+const channelLabel = (ch?: string) => ch === 'line' ? '🟢 LINE' : ch === 'whatsapp' ? '🟩 WhatsApp' : '🔵 Telegram';
+const channelIcon  = (ch?: string) => ch === 'line' ? '🟢' : ch === 'whatsapp' ? '🟩' : '🔵';
+
+// ─── Enchant tone labels ──────────────────────────────────────────────────────
+const TONE_META: Record<string, { label: string; color: string }> = {
+  formal:   { label: '🎩 สุภาพทางการ', color: '#6366F1' },
+  friendly: { label: '😊 เป็นกันเอง',   color: '#00D4AA' },
+  urgent:   { label: '⚡ กระชับ',        color: '#F59E0B' },
+};
+
+// ─── Slip Verification Badge ─────────────────────────────────────────────────
+function SlipBadge({ data }: { data: any }) {
+  if (!data) return null;
+
+  const STATUS_MAP: Record<string, { icon: string; label: string; color: string; bg: string; border: string }> = {
+    verified:  { icon: '✅', label: 'สลิปผ่านการตรวจสอบ', color: '#10B981', bg: 'rgba(16,185,129,0.08)', border: 'rgba(16,185,129,0.25)' },
+    fake:      { icon: '❌', label: 'สลิปไม่ผ่านการตรวจสอบ', color: '#EF4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.25)' },
+    duplicate: { icon: '⚠️', label: 'สลิปซ้ำ', color: '#F59E0B', bg: 'rgba(245,158,11,0.08)', border: 'rgba(245,158,11,0.25)' },
+    not_slip:  { icon: '🖼️', label: 'ไม่ใช่สลิป', color: '#6B7280', bg: 'rgba(107,114,128,0.08)', border: 'rgba(107,114,128,0.25)' },
+    error:     { icon: '⏳', label: 'รอตรวจสอบ', color: '#6B7280', bg: 'rgba(107,114,128,0.08)', border: 'rgba(107,114,128,0.25)' },
+    pending:   { icon: '⏳', label: 'กำลังตรวจสอบ', color: '#6B7280', bg: 'rgba(107,114,128,0.08)', border: 'rgba(107,114,128,0.25)' },
+  };
+
+  const s = STATUS_MAP[data.status] || STATUS_MAP.pending;
+  const VERIFY_MAP: Record<string, string> = { slipok: 'SlipOK', ai: 'AI Vision', manual: 'Manual', auto: 'Auto' };
+
+  return (
+    <div style={{
+      marginTop: 8, padding: '8px 10px', borderRadius: 8,
+      background: s.bg, border: `1px solid ${s.border}`,
+      fontSize: '0.75rem', lineHeight: 1.6,
+    }}>
+      <div style={{ fontWeight: 700, color: s.color, marginBottom: 2 }}>
+        {s.icon} {s.label}
+      </div>
+      {data.amount && (
+        <div style={{ color: 'var(--text-secondary)' }}>
+          💰 {Number(data.amount).toLocaleString()} บาท
+        </div>
+      )}
+      {(data.bankFrom || data.bankTo) && (
+        <div style={{ color: 'var(--text-secondary)' }}>
+          🏦 {data.bankFrom || '?'} → {data.bankTo || '?'}
+        </div>
+      )}
+      {data.transRef && (
+        <div style={{ color: 'var(--text-muted)' }}>
+          🔖 Ref: {data.transRef}
+        </div>
+      )}
+      <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem', marginTop: 2 }}>
+        🔍 {VERIFY_MAP[data.verifiedBy] || data.verifiedBy}
+      </div>
+    </div>
+  );
+}
+
 // ─── Message Bubble ──────────────────────────────────────────────────────────
-function MessageBubble({ msg, contactName }: { msg: Message; contactName: string }) {
+function MessageBubble({ msg, contactName, channel }: { msg: Message; contactName: string; channel?: string }) {
   const isCustomer = msg.senderType === 'customer';
   const isBot = msg.senderType === 'bot';
   const [lightbox, setLightbox] = useState(false);
 
+  // Parse metadata ครั้งเดียว ใช้ร่วมกันทั้ง slip / รูป / เสียง / วิดีโอ / ไฟล์
+  const meta: any = (() => {
+    if (!msg.metadata) return {};
+    try { return typeof msg.metadata === 'string' ? JSON.parse(msg.metadata) : msg.metadata; }
+    catch { return {}; }
+  })();
+  const slipData = meta?.slipVerification || null;
+
   const renderContent = () => {
-    if (msg.type === 'image') {
-      const imgUrl = msg.metadata?.imageUrl || msg.metadata?.originalContentUrl;
-      if (imgUrl) return (
-        <div>
-          <img src={imgUrl} alt="รูปภาพ" onClick={() => setLightbox(true)}
-            style={{ maxWidth: 240, maxHeight: 200, borderRadius: 8, cursor: 'zoom-in', objectFit: 'cover', display: 'block' }} />
-          {lightbox && (
-            <div onClick={() => setLightbox(false)}
-              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, cursor: 'zoom-out' }}>
-              <img src={imgUrl} alt="รูปภาพ" style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 8 }} />
-            </div>
-          )}
-        </div>
-      );
-      return <span style={{ opacity: 0.7 }}>🖼️ รูปภาพ</span>;
+    // ─── รูปภาพ / สติ๊กเกอร์ (WhatsApp จะมี imageUrl หลังดาวน์โหลด) ───────────────
+    // imageUrl เป็น relative path เช่น /uploads/whatsapp-media/xxx.jpg หรือ /uploads/line-images/xxx.jpg
+    // → Next.js rewrite ส่งต่อไป backend อัตโนมัติ ไม่ต้องต่อ host
+    const staticUrl = meta?.imageUrl || meta?.originalContentUrl || null;
+    if (msg.type === 'image' || (msg.type === 'sticker' && staticUrl)) {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('crm_token') || '' : '';
+      const tenantId = typeof window !== 'undefined' ? localStorage.getItem('crm_tenant_id') || '' : '';
+
+      // Fallback: LINE Content Proxy — ใช้เฉพาะ LINE เท่านั้น (WhatsApp ใช้ static file)
+      const platformMsgId = msg.platformMsgId || meta?.messageId;
+      const proxyUrl = (channel === 'line' && platformMsgId)
+        ? `/api/line/content/${platformMsgId}?token=${encodeURIComponent(token)}&tenantId=${encodeURIComponent(tenantId)}`
+        : null;
+
+      // ใช้ staticUrl ก่อน ถ้าไม่มีใช้ proxyUrl
+      const imgUrl = staticUrl || proxyUrl;
+
+      if (imgUrl) {
+        const handleImgError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+          const img = e.target as HTMLImageElement;
+          // ถ้ายังไม่เคยลอง proxy และมี proxyUrl → switch ไป proxy
+          if (proxyUrl && !img.dataset.triedProxy) {
+            img.dataset.triedProxy = 'true';
+            img.src = proxyUrl;
+          } else {
+            img.style.display = 'none';
+            img.insertAdjacentHTML('afterend', '<span style="opacity:0.7">🖼️ รูปภาพ (โหลดไม่ได้)</span>');
+          }
+        };
+        return (
+          <div>
+            <img
+              src={imgUrl}
+              alt="รูปภาพ"
+              onClick={() => setLightbox(true)}
+              onError={handleImgError}
+              style={{ maxWidth: 240, maxHeight: 200, borderRadius: 8, cursor: 'zoom-in', objectFit: 'cover', display: 'block' }}
+            />
+            <a
+              href={imgUrl}
+              download
+              target="_blank"
+              rel="noreferrer"
+              onClick={e => e.stopPropagation()}
+              style={{ display: 'inline-block', marginTop: 4, fontSize: '0.7rem', color: 'var(--text-muted)', textDecoration: 'none' }}
+            >
+              ⬇️ ดาวน์โหลด
+            </a>
+            {lightbox && (
+              <div
+                onClick={() => setLightbox(false)}
+                style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, cursor: 'zoom-out' }}
+              >
+                <img
+                  src={imgUrl}
+                  alt="รูปภาพ"
+                  style={{ maxWidth: '90vw', maxHeight: '90vh', objectFit: 'contain', borderRadius: 8 }}
+                />
+              </div>
+            )}
+          </div>
+        );
+      }
+      return <span style={{ opacity: 0.7 }}>🖼️ รูปภาพ (ไม่มี ID)</span>;
     }
     if (msg.type === 'sticker') return <span style={{ fontSize: '2.5rem' }}>😊</span>;
-    if (msg.type === 'audio') return <span>🎵 เสียง</span>;
-    if (msg.type === 'file') return <span>📎 {msg.content}</span>;
+    // ─── เสียง (voice note) — เล่นฟังได้ในหน้า Inbox ─────────────────────────────
+    if (msg.type === 'audio') {
+      const audioUrl = meta?.audioUrl || null;
+      if (audioUrl) {
+        return (
+          <div style={{ minWidth: 220 }}>
+            <audio
+              controls
+              preload="metadata"
+              src={audioUrl}
+              style={{ width: 240, height: 40, display: 'block' }}
+            />
+            <a
+              href={audioUrl}
+              download
+              target="_blank"
+              rel="noreferrer"
+              style={{ display: 'inline-block', marginTop: 4, fontSize: '0.7rem', color: 'var(--text-muted)', textDecoration: 'none' }}
+            >
+              ⬇️ ดาวน์โหลดเสียง
+            </a>
+          </div>
+        );
+      }
+      return <span>🎵 เสียง</span>;
+    }
+    // ─── วิดีโอ ─────────────────────────────────────────────────────────────────
+    if (msg.type === 'video') {
+      const videoUrl = meta?.videoUrl || null;
+      if (videoUrl) {
+        return (
+          <video
+            controls
+            preload="metadata"
+            src={videoUrl}
+            style={{ maxWidth: 260, maxHeight: 320, borderRadius: 8, display: 'block' }}
+          />
+        );
+      }
+      return <span>🎬 วิดีโอ</span>;
+    }
+    // ─── ไฟล์เอกสาร ─────────────────────────────────────────────────────────────
+    if (msg.type === 'file') {
+      const fileUrl = meta?.fileUrl || null;
+      if (fileUrl) {
+        return (
+          <a href={fileUrl} download target="_blank" rel="noreferrer" style={{ color: 'var(--teal)', textDecoration: 'none' }}>
+            📎 {meta?.fileName || msg.content || 'ไฟล์'}
+          </a>
+        );
+      }
+      return <span>📎 {msg.content}</span>;
+    }
     if (msg.type === 'location') return <span>📍 {msg.content}</span>;
     return <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</span>;
   };
@@ -113,6 +286,7 @@ function MessageBubble({ msg, contactName }: { msg: Message; contactName: string
       )}
       <div className={`${styles.msgBubble} ${isCustomer ? styles.bubbleCustomer : isBot ? styles.bubbleBot : styles.bubbleAgent}`}>
         {renderContent()}
+        {slipData && <SlipBadge data={slipData} />}
         <div className={styles.msgMeta}>
           {isBot ? '🤖 Bot' : isCustomer ? contactName : (msg.sender?.displayName || 'Agent')}
           {' · '}
@@ -128,6 +302,7 @@ function MessageBubble({ msg, contactName }: { msg: Message; contactName: string
   );
 }
 
+
 // ─── Main Inbox Page ──────────────────────────────────────────────────────────
 export default function InboxPage() {
   const { lang, t } = useLang();
@@ -139,36 +314,59 @@ export default function InboxPage() {
   const [newMsg, setNewMsg] = useState('');
   const [filter, setFilter] = useState('all');
   const [channel, setChannel] = useState('all');
+  const [companyFilter, setCompanyFilter] = useState('all');
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
   const [search, setSearch] = useState('');
   const [sending, setSending] = useState(false);
   const [aiSuggest, setAiSuggest] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
+  // ─── Enchant (พิมพ์ลาว → แปลไทย + แนะนำ 3 โทน) ───────────────────────────────
+  const [enchant, setEnchant] = useState<{ lang: string; thai: string; suggestions: { tone: string; text: string }[] } | null>(null);
+  const [loadingEnchant, setLoadingEnchant] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [showCanned, setShowCanned] = useState(false);
   const [cannedFilter, setCannedFilter] = useState('');
   const [totalUnread, setTotalUnread] = useState(0);
+  // ─── External Reply Detection ───────────────────────────────────────────────
+  // true = มีสัญญาณว่า admin ตอบนอก CRM (ลูกค้าส่งล่าสุด แต่ใน DB ไม่มี agent reply ตามมา
+  //         ทั้งที่ conversation status เป็น resolved/open แล้ว)
+  const [externalReplyWarning, setExternalReplyWarning] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  // ─── Admin Presence (ป้องกันตอบซ้อน) ──────────────────────────────────────
+  const [convViewers, setConvViewers] = useState<{ userId: string; displayName: string; username: string }[]>([]);
+  const [adminTyping, setAdminTyping] = useState<string | null>(null); // displayName ของแอดมินที่กำลังพิมพ์
+  const adminTypingTimeout = useRef<NodeJS.Timeout | undefined>(undefined);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeConvRef = useRef<string | null>(null);
-  const typingTimeout = useRef<NodeJS.Timeout>();
+  const typingTimeout = useRef<NodeJS.Timeout | undefined>(undefined);
 
   // ─── Load conversations ───────────────────────────────────────────────────
   const loadConversations = useCallback(async () => {
     const params: any = { limit: 50 };
     if (filter !== 'all') { if (filter === 'mine') params.assignedTo = 'me'; else params.status = filter; }
     if (channel !== 'all') params.channel = channel;
+    if (companyFilter !== 'all') params.companyId = companyFilter;
     if (search) params.search = search;
     try {
       const r = await api.get('/conversations', { params });
       const convs = r.data.conversations || [];
-      setConversations(convs);
-      const unread = convs.filter((c: Conversation) => c._unread > 0).length;
-      setTotalUnread(unread);
+      setConversations(convs); // totalUnread ถูกคำนวณใน useEffect ที่ผูกกับ conversations
     } catch { toast.error('โหลดบทสนทนาไม่ได้'); }
-  }, [filter, channel, search]);
+  }, [filter, channel, companyFilter, search]);
 
   useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  // โหลดรายชื่อบริษัท (สำหรับตัวกรอง) — ถ้ามีมากกว่า 1 บริษัทจะโชว์ dropdown
+  useEffect(() => {
+    api.get('/companies').then(r => setCompanies(r.data.companies || [])).catch(() => {});
+  }, []);
+
+  // อัปเดตตัวเลข "X ใหม่" บนหัว list ให้ตามจำนวนห้องที่ยังไม่อ่าน (เรียลไทม์)
+  useEffect(() => {
+    setTotalUnread(conversations.filter(c => (c._unread ?? 0) > 0).length);
+  }, [conversations]);
 
   // ─── Load messages ────────────────────────────────────────────────────────
   const loadMessages = useCallback(async (id: string) => {
@@ -176,9 +374,44 @@ export default function InboxPage() {
     try {
       const r = await api.get(`/conversations/${id}`);
       const conv = r.data.conversation;
-      setMessages(conv?.messages || []);
+      const msgs: Message[] = conv?.messages || [];
+      setMessages(msgs);
       setActiveConv(conv);
       activeConvRef.current = id;
+
+      // ─── External Reply Detection ─────────────────────────────────────────
+      // ตรวจหา "gap": ถ้าข้อความล่าสุดใน DB เป็น customer แต่ conversation
+      // status ไม่ใช่ 'bot'/'open' อีกต่อไป (resolved/closed) หรือ
+      // มีช่องว่างเวลา > 3 นาที ระหว่าง customer message ล่าสุดกับ reply
+      // → อาจหมายความว่า admin ตอบนอก CRM แล้ว
+      if (msgs.length > 0) {
+        const lastMsg = msgs[msgs.length - 1];
+        const lastCustomerIdx = [...msgs].reverse().findIndex(m => m.senderType === 'customer');
+        const lastCustomer = lastCustomerIdx >= 0 ? msgs[msgs.length - 1 - lastCustomerIdx] : null;
+
+        if (lastCustomer) {
+          // หา agent/bot message ที่ตามหลัง lastCustomer
+          const lastCustomerTime = new Date(lastCustomer.createdAt).getTime();
+          const agentAfter = msgs.find(m =>
+            (m.senderType === 'agent' || m.senderType === 'bot') &&
+            new Date(m.createdAt).getTime() > lastCustomerTime
+          );
+
+          // ถ้าไม่มี agent reply หลังข้อความลูกค้าล่าสุด
+          // และ conversation status เป็น resolved/closed (admin จัดการนอก CRM)
+          // หรือข้อความล่าสุดเป็น customer และ gap > 5 นาที
+          const gapMs = Date.now() - lastCustomerTime;
+          const isLongGap = gapMs > 5 * 60 * 1000; // > 5 นาที
+          const isResolvedWithNoReply = (conv?.status === 'resolved' || conv?.status === 'closed') && !agentAfter;
+          const lastMsgIsCustomer = lastMsg.senderType === 'customer' && isLongGap && !agentAfter;
+
+          setExternalReplyWarning(isResolvedWithNoReply || lastMsgIsCustomer);
+        } else {
+          setExternalReplyWarning(false);
+        }
+      } else {
+        setExternalReplyWarning(false);
+      }
     } catch { toast.error('โหลดข้อความไม่ได้'); }
     finally { setLoadingMessages(false); }
   }, []);
@@ -189,10 +422,51 @@ export default function InboxPage() {
     setActiveConv(conv);
     setMessages([]);
     setAiSuggest('');
+    setEnchant(null);
+    setConvViewers([]); // reset viewers เมื่อเปลี่ยน conversation
+    setAdminTyping(null);
+    setExternalReplyWarning(false); // reset warning เมื่อเปลี่ยน conversation
     getSocket()?.emit('join:conversation', conv.id);
     loadMessages(conv.id);
     setConversations(prev => prev.map(c => c.id === conv.id ? { ...c, _unread: 0 } : c));
   }, [loadMessages]);
+
+  // ─── Manual Sync — เรียก backend sync-line API ──────────────────────────────
+  const syncMessages = useCallback(async () => {
+    if (!activeConv || syncing) return;
+    setSyncing(true);
+    const toastId = toast.loading('🔄 กำลัง Sync กับ LINE...');
+    try {
+      if (activeConv.channel === 'line') {
+        // เรียก /sync-line API: update profile + ตรวจ gap + inject notes
+        const r = await api.post(`/conversations/${activeConv.id}/sync-line`);
+        const s = r.data.summary;
+
+        // แสดงผลสรุป
+        const lines = s.results as string[];
+        toast.success(
+          `✅ Sync เสร็จ\n${lines.slice(0, 3).join('\n')}`,
+          { id: toastId, duration: 5000 }
+        );
+
+        if (s.gapsFound > 0) {
+          toast(`⚠️ พบ ${s.gapsFound} gap — บันทึก note เข้าประวัติแล้ว`, {
+            icon: '📝', duration: 4000,
+          });
+          setExternalReplyWarning(false); // ซ่อน banner เพราะ inject note แล้ว
+        }
+      } else {
+        toast.success('🔄 รีเฟรชข้อความแล้ว', { id: toastId });
+      }
+
+      // Reload messages หลัง sync เสมอ
+      await loadMessages(activeConv.id);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Sync ไม่สำเร็จ', { id: toastId });
+    } finally {
+      setSyncing(false);
+    }
+  }, [activeConv, syncing, loadMessages]);
 
   // ─── Auto-scroll ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -201,29 +475,69 @@ export default function InboxPage() {
 
   // ─── Socket: new_message ─────────────────────────────────────────────────
   useSocket('new_message', (data: any) => {
-    if (data.conversationId === activeConvRef.current) {
-      setMessages(prev => {
-        if (prev.some(m => m.id === data.message.id)) return prev;
-        return [...prev, data.message];
-      });
+    const isActive = data.conversationId === activeConvRef.current;
+    const isCustomer = data.message?.senderType === 'customer';
+    const nowIso = new Date().toISOString();
+
+    // 1) ถ้าเปิดห้องนี้อยู่ → ต่อข้อความใหม่ทันที (ทุก senderType)
+    if (isActive) {
+      setMessages(prev => prev.some(m => m.id === data.message.id) ? prev : [...prev, data.message]);
       setTypingUsers([]);
-    } else {
-      // แจ้งเตือนถ้าเป็น message จากลูกค้า
-      if (data.message.senderType === 'customer') {
-        playNotificationSound();
-        toast('💬 ข้อความใหม่จาก ' + (data.contact?.displayName || 'ลูกค้า'), { icon: data.channel === 'line' ? '🟢' : '🔵' });
-        setConversations(prev => prev.map(c =>
-          c.id === data.conversationId ? { ...c, _unread: (c._unread || 0) + 1, lastMessageAt: new Date().toISOString() } : c
-        ).sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()));
+    }
+
+    // 2) เสียง + แจ้งเตือน เมื่อลูกค้าทักเข้ามา (ทุกห้อง — ดังแม้กำลังเปิดห้องอื่น)
+    if (isCustomer) {
+      playNotificationSound();
+      if (!isActive) {
+        toast('💬 ข้อความใหม่จาก ' + (data.contact?.displayName || 'ลูกค้า'), { icon: channelIcon(data.channel) });
       }
     }
+
+    // 3) อัปเดต list — ถ้าห้องยังไม่อยู่ใน list (ห้องใหม่/ลูกค้าใหม่) ให้โหลด list ใหม่
+    const known = conversations.some(c => c.id === data.conversationId);
+    if (!known) {
+      loadConversations();
+      return;
+    }
+    setConversations(prev => {
+      const idx = prev.findIndex(c => c.id === data.conversationId);
+      if (idx === -1) return prev;
+      const updated: Conversation = {
+        ...prev[idx],
+        lastMessageAt: nowIso,
+        messages: [data.message],                       // อัปเดตข้อความตัวอย่างใน list
+        _unread: isActive ? 0 : (isCustomer ? ((prev[idx]._unread || 0) + 1) : (prev[idx]._unread || 0)),
+      };
+      // ย้ายห้องที่มีข้อความใหม่ขึ้นบนสุด
+      return [updated, ...prev.filter((_, i) => i !== idx)];
+    });
   });
 
   useSocket('conversation_updated', () => { loadConversations(); if (activeConvRef.current) loadMessages(activeConvRef.current); });
-  useSocket('typing', (data: any) => {
+
+  // ─── Admin Typing (ป้องกันตอบซ้อน) ──────────────────────────────────────
+  useSocket('admin_typing', (data: any) => {
+    if (data.conversationId !== activeConvRef.current) return;
     setTypingUsers(prev => prev.includes(data.username) ? prev : [...prev, data.username]);
+    setAdminTyping(data.displayName || data.username);
     clearTimeout(typingTimeout.current);
+    clearTimeout(adminTypingTimeout.current);
     typingTimeout.current = setTimeout(() => setTypingUsers([]), 3000);
+    adminTypingTimeout.current = setTimeout(() => setAdminTyping(null), 3000);
+  });
+
+  // ─── Admin Presence: เข้า/ออก conversation ───────────────────────────────
+  useSocket('admin_enter', (data: any) => {
+    if (data.conversationId !== activeConvRef.current) return;
+    setConvViewers(data.viewers || []);
+  });
+  useSocket('admin_leave', (data: any) => {
+    if (data.conversationId !== activeConvRef.current) return;
+    setConvViewers(data.viewers || []);
+  });
+  useSocket('conversation_viewers', (data: any) => {
+    if (data.conversationId !== activeConvRef.current) return;
+    setConvViewers(data.viewers || []);
   });
 
   // ─── Send message ─────────────────────────────────────────────────────────
@@ -231,7 +545,7 @@ export default function InboxPage() {
     if (!newMsg.trim() || !activeConv || sending) return;
     setSending(true);
     const content = newMsg;
-    setNewMsg(''); setAiSuggest(''); setShowCanned(false);
+    setNewMsg(''); setAiSuggest(''); setShowCanned(false); setEnchant(null);
     const toastId = toast.loading('กำลังส่ง...');
     try {
       await api.post(`/conversations/${activeConv.id}/messages`, { content });
@@ -267,6 +581,28 @@ export default function InboxPage() {
       toast.success('AI แนะนำสำเร็จ', { id: toastId });
     } catch { toast.error('AI ไม่ตอบสนอง', { id: toastId }); }
     finally { setLoadingAI(false); }
+  };
+
+  // ─── Enchant: ส่งร่าง (ลาว) → รับคำแปลไทย + คำตอบ 3 โทน ──────────────────────
+  const enchantDraft = async () => {
+    if (!activeConv || loadingEnchant || !newMsg.trim()) return;
+    setLoadingEnchant(true);
+    const toastId = toast.loading('✨ Enchant กำลังแปลและคิดคำตอบ...');
+    try {
+      const r = await api.post(`/conversations/${activeConv.id}/enchant`, { draft: newMsg });
+      setEnchant({ lang: r.data.lang, thai: r.data.thai, suggestions: r.data.suggestions || [] });
+      setShowCanned(false); setAiSuggest('');
+      toast.success(`✨ ได้ ${r.data.suggestions?.length || 0} คำตอบ`, { id: toastId });
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || 'Enchant ไม่สำเร็จ', { id: toastId });
+    } finally { setLoadingEnchant(false); }
+  };
+
+  // ใช้คำตอบที่ Enchant แนะนำ → ใส่ลงช่องพิมพ์ (แอดมินกด Enter ส่งเอง)
+  const useEnchantSuggestion = (text: string) => {
+    setNewMsg(text);
+    setEnchant(null);
+    textareaRef.current?.focus();
   };
 
   // ─── Toggle Bot/Human ─────────────────────────────────────────────────────
@@ -318,10 +654,23 @@ export default function InboxPage() {
             ))}
           </div>
 
+          {companies.length > 1 && (
+            <select
+              className="input"
+              value={companyFilter}
+              onChange={e => setCompanyFilter(e.target.value)}
+              style={{ marginBottom: 8, fontSize: '0.82rem', padding: '6px 10px', cursor: 'pointer' }}
+            >
+              <option value="all">🏢 ทุกบริษัท</option>
+              {companies.map(c => <option key={c.id} value={c.id}>🏢 {c.name}</option>)}
+            </select>
+          )}
+
           <div className={styles.channelFilters}>
             {[
               { key: 'all', label: 'ทุกช่อง', icon: '📱' },
               { key: 'line', label: 'LINE', icon: '🟢' },
+              { key: 'whatsapp', label: 'WhatsApp', icon: '🟩' },
               { key: 'telegram', label: 'TG', icon: '🔵' },
             ].map(c => (
               <button key={c.key} className={`${styles.channelBtn} ${channel === c.key ? styles.active : ''}`} onClick={() => setChannel(c.key)}>
@@ -352,7 +701,7 @@ export default function InboxPage() {
                 onClick={() => selectConversation(conv)}>
                 <div style={{ position: 'relative', flexShrink: 0 }}>
                   <div className="avatar">{conv.contact?.displayName?.[0] || '?'}</div>
-                  <div style={{ position: 'absolute', bottom: -2, right: -2, width: 12, height: 12, borderRadius: '50%', background: conv.channel === 'line' ? '#00B900' : '#2AABEE', border: '2px solid var(--bg-secondary)' }} />
+                  <div style={{ position: 'absolute', bottom: -2, right: -2, width: 12, height: 12, borderRadius: '50%', background: channelColor(conv.channel), border: '2px solid var(--bg-secondary)' }} />
                 </div>
                 <div className={styles.convInfo}>
                   <div className={styles.convTop}>
@@ -401,19 +750,39 @@ export default function InboxPage() {
             <div className={styles.chatHeader}>
               <div style={{ position: 'relative', flexShrink: 0 }}>
                 <div className="avatar">{activeConv.contact?.displayName?.[0] || '?'}</div>
-                <div style={{ position: 'absolute', bottom: -1, right: -1, width: 10, height: 10, borderRadius: '50%', background: activeConv.channel === 'line' ? '#00B900' : '#2AABEE', border: '2px solid var(--bg-secondary)' }} />
+                <div style={{ position: 'absolute', bottom: -1, right: -1, width: 10, height: 10, borderRadius: '50%', background: channelColor(activeConv.channel), border: '2px solid var(--bg-secondary)' }} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{activeConv.contact?.displayName}</div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2, flexWrap: 'wrap' }}>
                   <span className={`badge badge-${activeConv.channel}`} style={{ fontSize: '0.7rem' }}>
-                    {activeConv.channel === 'line' ? '🟢 LINE' : '🔵 Telegram'}
+                    {channelLabel(activeConv.channel)}
                   </span>
                   <span className={`badge badge-${activeConv.status}`} style={{ fontSize: '0.7rem' }}>{activeConv.status}</span>
                   {activeConv.assignedTo && <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>👤 {activeConv.assignedTo.displayName}</span>}
+                  {/* ── CRM-only notice ── */}
+                  <span title="ข้อความที่ตอบจาก LINE OA Manager โดยตรงจะไม่บันทึกใน CRM" style={{
+                    fontSize: '0.62rem', padding: '1px 6px',
+                    background: 'rgba(245,158,11,0.1)', color: 'var(--warning)',
+                    border: '1px solid rgba(245,158,11,0.25)', borderRadius: 8,
+                    cursor: 'help', whiteSpace: 'nowrap',
+                  }}>⚠️ ตอบผ่าน CRM เท่านั้น</span>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                {/* Sync/Refresh Button */}
+                <button
+                  className="btn btn-ghost btn-sm btn-icon"
+                  onClick={syncMessages}
+                  disabled={syncing}
+                  title="รีเฟรชข้อความล่าสุด"
+                  style={{ fontSize: '0.9rem' }}
+                >
+                  {syncing
+                    ? <span className="spinner" style={{ width: 13, height: 13 }} />
+                    : '🔄'
+                  }
+                </button>
                 {/* Bot/Human Toggle */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: 'var(--bg-tertiary)', borderRadius: 20, border: '1px solid var(--border)' }}>
                   <span style={{ fontSize: '0.75rem', color: activeConv.isBot ? 'var(--purple)' : 'var(--teal)' }}>
@@ -433,6 +802,39 @@ export default function InboxPage() {
               </div>
             </div>
 
+
+
+
+            {/* ═══ Admin Presence Bar — แอดมินคนไหนกำลังดูอยู่ ═══════════════════════════ */}
+            {convViewers.length > 1 && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '5px 16px',
+                background: 'rgba(0,212,170,0.06)',
+                borderBottom: '1px solid rgba(0,212,170,0.15)',
+                fontSize: '0.75rem', color: 'var(--teal)',
+              }}>
+                <span>👥 กำลังดูอยู่:</span>
+                {convViewers.map(v => (
+                  <span key={v.userId} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '2px 8px', borderRadius: 12,
+                    background: 'rgba(0,212,170,0.12)',
+                    border: '1px solid rgba(0,212,170,0.2)',
+                    fontWeight: 600,
+                  }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--teal)', display: 'inline-block' }} />
+                    {v.displayName || v.username}
+                  </span>
+                ))}
+                {convViewers.length > 1 && (
+                  <span style={{ color: 'var(--warning)', marginLeft: 4, fontWeight: 600 }}>
+                    ⚠️ มีแอดมินหลายคนดูอยู่
+                  </span>
+                )}
+              </div>
+            )}
+
             {/* Messages */}
             <div className={styles.messages}>
               {loadingMessages && (
@@ -447,18 +849,22 @@ export default function InboxPage() {
                 </div>
               )}
               {messages.map(msg => (
-                <MessageBubble key={msg.id} msg={msg} contactName={activeConv.contact?.displayName} />
+                <MessageBubble key={msg.id} msg={msg} contactName={activeConv.contact?.displayName} channel={activeConv.channel} />
               ))}
-              {/* Typing Indicator */}
+              {/* Typing Indicator — สำหรับที่แอดมินอื่นกำลังพิมพ์ */}
               {typingUsers.length > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }}>
-                  <div className="avatar avatar-sm">A</div>
-                  <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: '8px 14px', border: '1px solid var(--border)' }}>
+                  <div className="avatar avatar-sm" style={{ background: 'var(--warning)', fontSize: '0.7rem' }}>
+                    {typingUsers[0]?.[0] || 'A'}
+                  </div>
+                  <div style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: '8px 14px', border: '1px solid rgba(245,158,11,0.3)' }}>
                     <div className="typing-indicator" style={{ padding: 0 }}>
                       <div className="typing-dot" /><div className="typing-dot" /><div className="typing-dot" />
                     </div>
                   </div>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{typingUsers.join(', ')} กำลังพิมพ์...</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--warning)', fontWeight: 600 }}>
+                    👤 {typingUsers.join(', ')} กำลังพิมพ์...
+                  </span>
                 </div>
               )}
               <div ref={messagesEndRef} />
@@ -471,6 +877,47 @@ export default function InboxPage() {
                 <span style={{ flex: 1 }}>{aiSuggest}</span>
                 <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginLeft: 8, flexShrink: 0 }}>คลิกเพื่อใช้ →</span>
                 <button onClick={e => { e.stopPropagation(); setAiSuggest(''); }} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0 4px', fontSize: '0.8rem' }}>✕</button>
+              </div>
+            )}
+
+            {/* ═══ Enchant Suggestions — แปลร่าง (ลาว) + คำตอบ 3 โทน ═══════════════ */}
+            {enchant && (
+              <div style={{
+                margin: '0 16px 8px', padding: 12,
+                background: 'rgba(124,58,237,0.05)',
+                border: '1px solid rgba(124,58,237,0.25)', borderRadius: 12,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontWeight: 700, color: 'var(--purple)', fontSize: '0.82rem' }}>✨ Enchant</span>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                    แปลจาก {enchant.lang} → เลือกคำตอบที่จะส่ง
+                  </span>
+                  <button onClick={() => setEnchant(null)}
+                    style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.85rem' }}>✕</button>
+                </div>
+                {/* คำแปลร่างเป็นไทย */}
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', background: 'var(--bg-tertiary)', borderRadius: 8, padding: '6px 10px', marginBottom: 8, lineHeight: 1.5 }}>
+                  📝 ร่างของคุณ (ไทย): <span style={{ color: 'var(--text-primary)' }}>{enchant.thai}</span>
+                </div>
+                {/* คำตอบแนะนำ 3 โทน */}
+                {enchant.suggestions.length === 0 && (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', padding: 8 }}>ไม่มีคำตอบแนะนำ</div>
+                )}
+                {enchant.suggestions.map((s, i) => {
+                  const meta = TONE_META[s.tone] || { label: s.tone, color: 'var(--teal)' };
+                  return (
+                    <div key={i} onClick={() => { useEnchantSuggestion(s.text); toast.success('✅ ใส่คำตอบแล้ว — กด Enter เพื่อส่ง'); }}
+                      style={{ background: 'var(--bg-tertiary)', border: '1px solid var(--border)', borderRadius: 10, padding: '9px 12px', marginBottom: 6, cursor: 'pointer', transition: 'border-color 0.2s, background 0.2s' }}
+                      onMouseEnter={e => { (e.currentTarget as any).style.borderColor = meta.color; (e.currentTarget as any).style.background = 'rgba(124,58,237,0.06)'; }}
+                      onMouseLeave={e => { (e.currentTarget as any).style.borderColor = 'var(--border)'; (e.currentTarget as any).style.background = 'var(--bg-tertiary)'; }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                        <span style={{ fontSize: '0.68rem', fontWeight: 700, color: meta.color }}>{meta.label}</span>
+                        <span style={{ marginLeft: 'auto', fontSize: '0.65rem', color: 'var(--text-muted)' }}>คลิกเพื่อใช้ →</span>
+                      </div>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{s.text}</div>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -496,6 +943,54 @@ export default function InboxPage() {
                   🤖 Bot กำลังตอบอัตโนมัติ — สลับเป็น Human เพื่อตอบเอง
                 </div>
               )}
+              {/* ── LINE OA Direct Reply Reminder (สำหรับ LINE conversations) ── */}
+              {!activeConv.isBot && activeConv.channel === 'line' && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '5px 16px',
+                  background: 'rgba(0,185,0,0.04)',
+                  borderTop: '1px solid rgba(0,185,0,0.12)',
+                  fontSize: '0.7rem', color: 'rgba(0,185,0,0.8)',
+                }}>
+                  <span>🟢</span>
+                  <span>ข้อความนี้จะส่งผ่าน LINE API และ<strong>บันทึกใน CRM อัตโนมัติ</strong> — อย่าตอบผ่าน LINE OA Manager</span>
+                </div>
+              )}
+              {/* ⚠️ Warning: แอดมินคนอื่นกำลังพิมพ์ — เตือนไม่ให้ตอบซ้อน */}
+              {adminTyping && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '7px 16px',
+                  background: 'rgba(245,158,11,0.08)',
+                  borderTop: '1px solid rgba(245,158,11,0.25)',
+                  fontSize: '0.78rem', color: 'var(--warning)',
+                  fontWeight: 600,
+                  animation: 'pulse 1.5s infinite',
+                }}>
+                  <span>⚠️</span>
+                  <span>{adminTyping} กำลังพิมพ์ตอบลูกค้าอยู่ — โปรดรอก่อนส่ง</span>
+                  <span style={{ marginLeft: 'auto', opacity: 0.6, fontSize: '0.7rem', fontWeight: 400 }}>เพื่อป้องกันการตอบซ้อน</span>
+                </div>
+              )}
+              {/* ── Enchant toolbar — พิมพ์ลาว แล้วให้ AI แปล+แนะนำ ── */}
+              {!activeConv.isBot && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px 0' }}>
+                  <button
+                    className="btn btn-sm"
+                    onClick={enchantDraft}
+                    disabled={loadingEnchant || !newMsg.trim()}
+                    title="พิมพ์ภาษาลาว แล้วกด Enchant — AI แปลเป็นไทย + แนะนำคำตอบ 3 โทน"
+                    style={{ borderColor: 'var(--purple)', color: 'var(--purple)', background: 'rgba(124,58,237,0.1)', whiteSpace: 'nowrap', fontWeight: 700 }}
+                  >
+                    {loadingEnchant
+                      ? <><span className="spinner" style={{ width: 13, height: 13 }} /> กำลังคิด...</>
+                      : '✨ Enchant'}
+                  </button>
+                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                    พิมพ์ภาษาลาว แล้วกด Enchant → AI แปลไทย + แนะนำคำตอบ 3 โทน
+                  </span>
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', padding: '12px 16px' }}>
                 <div style={{ flex: 1, position: 'relative' }}>
                   <textarea
@@ -508,7 +1003,7 @@ export default function InboxPage() {
                     disabled={activeConv.isBot}
                     onKeyDown={e => {
                       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-                      if (e.key === 'Escape') { setShowCanned(false); setAiSuggest(''); }
+                      if (e.key === 'Escape') { setShowCanned(false); setAiSuggest(''); setEnchant(null); }
                     }}
                     style={{ resize: 'none', borderRadius: 10, paddingRight: 40, minHeight: 60 }}
                   />
@@ -741,6 +1236,7 @@ function AiAdminPanel({ conv, messages, onUseDraft, onResolve, onToggleBot }: {
               {contact.username && <div style={{ fontSize: '0.78rem', color: 'var(--teal)', marginTop: 2 }}>@{contact.username}</div>}
               <div style={{ display: 'flex', gap: 4, justifyContent: 'center', marginTop: 6, flexWrap: 'wrap' }}>
                 {contact.lineUserId   && <span className="badge badge-line"     style={{ fontSize: '0.68rem' }}>🟢 LINE</span>}
+                {contact.whatsappId   && <span className="badge badge-whatsapp" style={{ fontSize: '0.68rem' }}>🟩 WhatsApp</span>}
                 {contact.telegramId   && <span className="badge badge-telegram" style={{ fontSize: '0.68rem' }}>🔵 TG</span>}
                 {contact.memberType === 'vip' && <span style={{ background: '#F59E0B22', color: '#F59E0B', border: '1px solid #F59E0B44', borderRadius: 10, padding: '1px 7px', fontSize: '0.68rem', fontWeight: 700 }}>👑 VIP</span>}
               </div>
@@ -808,7 +1304,7 @@ function AiAdminPanel({ conv, messages, onUseDraft, onResolve, onToggleBot }: {
             <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 8, marginBottom: 4, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>ข้อมูลบทสนทนา</div>
             {[
               { icon: '📅', label: 'เริ่มเมื่อ', val: new Date(conv.createdAt).toLocaleDateString('th-TH') },
-              { icon: '📱', label: 'ช่องทาง', val: conv.channel === 'line' ? '🟢 LINE' : '🔵 Telegram' },
+              { icon: '📱', label: 'ช่องทาง', val: channelLabel(conv.channel) },
               { icon: '⚡', label: 'Priority', val: conv.priority },
               { icon: '💬', label: 'ข้อความ', val: `${messages.length} ข้อความ` },
               { icon: '👤', label: 'กำหนดให้', val: conv.assignedTo?.displayName || 'ยังไม่กำหนด' },

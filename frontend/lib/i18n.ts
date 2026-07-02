@@ -17,8 +17,13 @@ export const translations = {
   nav_pkm:             { th: '🎰 PKM สมาชิก',          lo: '🎰 PKM ສະມາຊິກ' },
   nav_import:          { th: 'Import ข้อมูล',        lo: 'ນຳເຂົ້າຂໍ້ມູນ' },
   nav_sms:             { th: 'SMS Gateway',          lo: 'ສົ່ງ SMS' },
+  nav_channels:        { th: 'ตั้งค่าช่องทาง',       lo: 'ຕັ້ງຄ່າຊ່ອງທາງ' },
+  nav_companies:       { th: 'บริษัท',                lo: 'ບໍລິສັດ' },
   nav_whatsapp:        { th: 'WhatsApp',             lo: 'WhatsApp' },
   nav_team:            { th: 'ทีม',                  lo: 'ທີມງານ' },
+  nav_profile:         { th: 'โปรไฟล์ & 2FA',        lo: 'ໂປຣໄຟລ໌ & 2FA' },
+  nav_audit_logs:      { th: 'ประวัติระบบ',          lo: 'ປະຫວັດລະບົບ' },
+  nav_lufy:            { th: 'ลิงก์ (lufy.cc)',       lo: 'ລິ້ງ (lufy.cc)' },
   nav_settings:        { th: 'ตั้งค่า',              lo: 'ຕັ້ງຄ່າ' },
 
   // ── Common Buttons ───────────────────────────────────────────────────────────

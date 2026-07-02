@@ -56,39 +56,39 @@ export default function DashboardPage() {
 
       {/* Charts */}
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20, marginBottom: 24 }}>
-        <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: 20 }}>
+        <div className="glass-card" style={{ padding: 24 }}>
           <div style={{ fontWeight: 600, marginBottom: 16 }}>📈 ปริมาณแชท 24 ชั่วโมง</div>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={chartData}>
               <defs>
                 <linearGradient id="teal" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#00D4AA" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#00D4AA" stopOpacity={0} />
+                  <stop offset="5%" stopColor="#00E5FF" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#00E5FF" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <XAxis dataKey="h" tick={{ fill: '#94A3B8', fontSize: 11 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: '#94A3B8', fontSize: 11 }} axisLine={false} tickLine={false} />
-              <Tooltip contentStyle={{ background: '#1A2540', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} />
-              <Area type="monotone" dataKey="msgs" stroke="#00D4AA" fill="url(#teal)" strokeWidth={2} />
+              <Tooltip contentStyle={{ background: '#141A34', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8 }} />
+              <Area type="monotone" dataKey="msgs" stroke="#00E5FF" fill="url(#teal)" strokeWidth={2.5} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
 
-        <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: 20 }}>
+        <div className="glass-card" style={{ padding: 24 }}>
           <div style={{ fontWeight: 600, marginBottom: 16 }}>📱 แยกตามช่องทาง</div>
           <ResponsiveContainer width="100%" height={200}>
             <PieChart>
               <Pie data={pieData} cx="50%" cy="50%" outerRadius={70} dataKey="value" label={({ name, percent }) => `${name} ${(percent*100).toFixed(0)}%`}>
                 {pieData.map((_, i) => <Cell key={i} fill={COLORS[i]} />)}
               </Pie>
-              <Tooltip contentStyle={{ background: '#1A2540', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 8 }} />
+              <Tooltip contentStyle={{ background: '#141A34', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 8 }} />
             </PieChart>
           </ResponsiveContainer>
         </div>
       </div>
 
       {/* Recent Conversations */}
-      <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: 20 }}>
+      <div className="glass-card" style={{ padding: 24 }}>
         <div style={{ fontWeight: 600, marginBottom: 16 }}>💬 แชทล่าสุด</div>
         <RecentConversations />
       </div>

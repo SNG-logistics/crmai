@@ -6,6 +6,38 @@ import { emitToTenant } from '../../lib/socket';
 
 const router = Router();
 
+const THAI_MOBILE_REGEX = /(?:\+?66|0)[689]\d{1}[-\s]?\d{3}[-\s]?\d{4}/;
+const THAI_LANDLINE_REGEX = /(?:\+?66|0)[2-57]\d{0,1}[-\s]?\d{3}[-\s]?\d{4}/;
+const LAO_PHONE_REGEX = /(?:020|030)[-\s]?\d{4}[-\s]?\d{4}/;
+
+function isPhoneNumber(text: string): boolean {
+  const clean = text.replace(/[-\s]/g, '');
+  if (/^(\+?66|0)[689]\d{8}$/.test(clean)) return true;
+  if (/^(\+?66|0)[2-57]\d{7,8}$/.test(clean)) return true;
+  if (/^(020|030)\d{8}$/.test(clean)) return true;
+
+  return THAI_MOBILE_REGEX.test(text) || THAI_LANDLINE_REGEX.test(text) || LAO_PHONE_REGEX.test(text);
+}
+
+function isFreeCreditQuery(text: string): boolean {
+  const t = text.toLowerCase();
+  const thaiKeywords = [
+    'เครดิตฟรี',
+    'ฟรีเครดิต',
+    'เครดิฟรี',
+    'เคดิสฟรี',
+    'เครดิตฟี',
+    'เครดิต ฟรี',
+    'ฟรี เครดิต',
+    'ขอเครดิต',
+    'ขอเคดิด',
+    'ขอเครดิส'
+  ];
+  const englishKeywords = ['free credit', 'freecredit'];
+
+  return thaiKeywords.some(kw => t.includes(kw)) || englishKeywords.some(kw => t.includes(kw));
+}
+
 /** POST /api/webhooks/telegram/:tenantId */
 router.post('/:tenantId', async (req: Request, res: Response) => {
   const { tenantId } = req.params;
@@ -90,6 +122,54 @@ router.post('/:tenantId', async (req: Request, res: Response) => {
 
     // ─── AI bot processing ────────────────────────────────────────────────
     if (conversation.isBot && normalized.messageType === 'text') {
+      // ✅ ตรวจสอบ: ลูกค้าส่งเบอร์โทรศัพท์มา → ตอบกลับรับรู้ข้อมูลลูกค้าแล้ว และส่งต่อให้เจ้าหน้าที่ทันที
+      if (isPhoneNumber(normalized.content)) {
+        const reply = `ได้รับข้อมูลเรียบร้อยแล้วค่ะ รอสักครู่ แอดมินกำลังตรวจสอบให้นะคะ 🙏😊`;
+        try {
+          await sendTelegramMessage(chatId, reply, botToken);
+          const botReply = await prisma.message.create({
+            data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: reply },
+          });
+          emitToTenant(tenantId, 'new_message', {
+            conversationId: conversation.id,
+            message: { ...botReply, senderType: 'bot' },
+            contact, channel: 'telegram',
+          });
+        } catch (e: any) {
+          console.warn(`[TG Bot] phone number reply failed:`, e.message);
+        }
+
+        // Handoff to human immediately
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { isBot: false, status: 'pending' },
+        });
+        emitToTenant(tenantId, 'conversation_updated', {
+          conversationId: conversation.id, status: 'pending', isBot: false,
+        });
+        console.log(`[TG Bot] 🔄 Handoff (phone number received) conversation=${conversation.id}`);
+        return;
+      }
+
+      // ✅ ตรวจสอบ: เครดิตฟรี → ตอบกลับว่าไม่มีบริการและให้รออัปเดต โดยบอทยังดูแลอยู่
+      if (isFreeCreditQuery(normalized.content)) {
+        const reply = `ตอนนี้ยังไม่มีบริการเครดิตฟรีนะคะ ถ้ามีช่วงไหน เดี๋ยวแอดมินแจ้งให้ทราบนะคะ 🙏😊`;
+        try {
+          await sendTelegramMessage(chatId, reply, botToken);
+          const botReply = await prisma.message.create({
+            data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: reply },
+          });
+          emitToTenant(tenantId, 'new_message', {
+            conversationId: conversation.id,
+            message: { ...botReply, senderType: 'bot' },
+            contact, channel: 'telegram',
+          });
+        } catch (e: any) {
+          console.warn(`[TG Bot] free credit reply failed:`, e.message);
+        }
+        return;
+      }
+
       try {
         const history = await prisma.message.findMany({
           where: { conversationId: conversation.id },

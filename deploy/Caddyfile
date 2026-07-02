@@ -1,0 +1,45 @@
+# Caddy reverse proxy — โดเมน + HTTPS (Let's Encrypt) อัตโนมัติ
+# ───────────────────────────────────────────────────────────────
+# วิธีใช้ (บน VPS):
+#   1) แก้ example.com เป็นโดเมนจริงจาก GoDaddy (ทั้ง 2 บรรทัด)
+#   2) เปิด port 80 และ 443 ที่ Windows Firewall + firewall ของผู้ให้บริการ VPS
+#   3) ชี้ DNS (A record @ และ www) มาที่ IP ของ VPS ก่อน (ดู DEPLOY.md)
+#   4) รัน:  caddy run --config Caddyfile
+#      (Caddy จะขอใบ SSL ให้เองภายในไม่กี่วินาที — ต้องให้ DNS ชี้มาถูกก่อน)
+#
+# หมายเหตุ: Caddy รองรับ WebSocket upgrade ให้เอง — realtime (Socket.IO) ผ่านได้เลย
+
+example.com, www.example.com {
+	encode gzip
+
+	# API + realtime + ไฟล์อัปโหลด → backend (Express) พอร์ต 4000
+	handle /api/* {
+		reverse_proxy localhost:4000
+	}
+	handle /socket.io/* {
+		reverse_proxy localhost:4000
+	}
+	handle /uploads/* {
+		reverse_proxy localhost:4000
+	}
+
+	# ทุกอย่างที่เหลือ → frontend (Next.js) พอร์ต 3000
+	handle {
+		reverse_proxy localhost:3000
+	}
+}
+
+# ─── (ทำทีหลังได้) lufy บน subdomain ─────────────────────────────
+# ต้องแก้ modules/lufy/frontend/.env.local เป็น
+#     NEXT_PUBLIC_API_URL=https://link.example.com/api
+# แล้ว build lufy frontend ใหม่ ก่อนเปิดบล็อกนี้
+#
+# link.example.com {
+# 	encode gzip
+# 	handle /api/* {
+# 		reverse_proxy localhost:3001
+# 	}
+# 	handle {
+# 		reverse_proxy localhost:3002
+# 	}
+# }

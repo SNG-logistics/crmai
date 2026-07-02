@@ -21,10 +21,15 @@ const NAV_KEYS = [
   { href: '/live',             icon: '🔴', key: 'nav_live'       },
   { href: '/flex',             icon: '✉️', key: 'nav_flex'       },
   { href: '/pkm',             icon: '🎰', key: 'nav_pkm'        },
+  { href: '/lufy',            icon: '🔗', key: 'nav_lufy'       },
   { href: '/settings/import',  icon: '📥', key: 'nav_import'     },
   { href: '/settings/sms',     icon: '📱', key: 'nav_sms'        },
+  { href: '/settings/channels', icon: '📡', key: 'nav_channels'  },
+  { href: '/settings/companies',icon: '🏢', key: 'nav_companies'  },
   { href: '/settings/whatsapp',icon: '💚', key: 'nav_whatsapp'   },
   { href: '/settings/users',   icon: '👥', key: 'nav_team'       },
+  { href: '/settings/profile',  icon: '👤', key: 'nav_profile'    },
+  { href: '/settings/audit-logs',icon: '📋', key: 'nav_audit_logs' },
   { href: '/settings',         icon: '⚙️', key: 'nav_settings'  },
 ] as const;
 
@@ -108,8 +113,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
 
         {/* Nav */}
-        <nav className="sidebar-nav">
-          {NAV_KEYS.map(({ href, icon, key }) => {
+        <nav className="sidebar-nav" style={{ maxHeight: 'calc(100vh - 290px)', overflowY: 'auto' }}>
+          {NAV_KEYS.filter(({ href }) => {
+            if (href === '/settings/audit-logs' && !['admin', 'supervisor', 'superadmin'].includes(user?.role || '')) return false;
+            return true;
+          }).map(({ href, icon, key }) => {
             const active = isActive(href);
             const badge = href === '/inbox' && inboxUnread > 0 ? inboxUnread : 0;
             return (

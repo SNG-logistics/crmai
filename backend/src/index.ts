@@ -26,9 +26,16 @@ import smsRoutes  from './routes/sms';
 import liveRoutes from './routes/live';
 import flexRoutes from './routes/flex';
 import whatsappRoutes from './routes/whatsapp';
+import companyRoutes from './routes/companies';
 import pkmRoutes from './routes/pkm';
+import auditRoutes from './routes/audit';
+import slipRoutes from './routes/slips';
+import uploadRoutes from './routes/upload';
+import lineContentRoutes from './routes/line-content';
 import { initWhatsAppSessions } from './services/whatsapp.service';
 import { startPkmListener } from './services/pkm-listener.service';
+import { isFirebaseEnabled, firebaseInitError } from './lib/firebase-admin';
+import { legacyJwtEnabled } from './middleware/auth';
 import lineWebhookRoutes from './routes/webhooks/line';
 
 
@@ -39,10 +46,26 @@ import telegramWebhookRoutes from './routes/webhooks/telegram';
 const app = express();
 const httpServer = createServer(app);
 
+// CORS Preflight & Custom Headers Middleware
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-tenant-id, ngrok-skip-browser-warning');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+    return;
+  }
+  next();
+});
+
 // Security
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: (origin, callback) => {
+    // Allow all origins (localhost, local IP, ngrok, etc.)
+    callback(null, true);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 }));
@@ -57,13 +80,17 @@ app.use('/api/webhooks', express.raw({ type: 'application/json' })); // raw for 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Static files — serve uploaded images
+import path from 'path';
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
 // Health check
 app.get('/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 // Root — API Info
 app.get('/', (_req, res) => {
   res.json({
-    name: '🎯 CRM มหาเฮง AI — Backend API',
+    name: '🎯 CRM Happy77 AI — Backend API',
     version: '1.0.0',
     status: 'running ✅',
     timestamp: new Date().toISOString(),
@@ -114,7 +141,12 @@ app.use('/api/sms',       smsRoutes);
 app.use('/api/live',      liveRoutes);
 app.use('/api/flex',       flexRoutes);
 app.use('/api/whatsapp',   whatsappRoutes);
+app.use('/api/companies',  companyRoutes);
 app.use('/api/pkm',        pkmRoutes);
+app.use('/api/audit',      auditRoutes);
+app.use('/api/slips',      slipRoutes);
+app.use('/api/upload',     uploadRoutes);
+app.use('/api/line',       lineContentRoutes);
 
 
 
@@ -136,6 +168,18 @@ const PORT = parseInt(process.env.PORT || '4000');
 
 async function main() {
   try {
+    // Fail fast if there is NO working auth path — otherwise every request 401s
+    // silently (Firebase misconfigured AND legacy JWT disabled/placeholder).
+    if (!isFirebaseEnabled() && !legacyJwtEnabled()) {
+      console.error('❌ FATAL: no usable auth. Firebase Admin is not configured' +
+        (firebaseInitError() ? ` (${firebaseInitError()})` : '') +
+        ' and legacy JWT is disabled/placeholder. Set FIREBASE_SERVICE_ACCOUNT_JSON or a real JWT_SECRET + ALLOW_LEGACY_JWT=true.');
+      process.exit(1);
+    }
+    if (!isFirebaseEnabled()) {
+      console.warn('⚠️  Firebase Admin not configured — running in LEGACY JWT mode only.');
+    }
+
     // Redis is optional — don't await, just try
     connectRedis().catch(() => {});
     initSocket(httpServer);
