@@ -35,6 +35,7 @@ export interface BTGame {
   id: string;
   name: string;
   image?: string | null;
+  banner?: string | null;
   winRate: number;
   freeSpinRate: number;
   wildRate: number;
@@ -187,10 +188,21 @@ function gameBubble(config: BTConfig, game: BTGame): any {
   const free = jitter(game.freeSpinRate, config.liveJitter);
   const wild = jitter(game.wildRate, config.liveJitter);
 
-  const body: any[] = [
-    { type: 'text', text: game.name, weight: 'bold', size: 'lg', color: GOLD_SOFT, wrap: true, maxLines: 2 },
-  ];
-  if (game.provider) body.push({ type: 'text', text: String(game.provider), size: 'xs', color: GOLD_DIM });
+  // แถวหัวการ์ด: ไอคอนเกม (ซ้าย) + ชื่อเกม/ค่าย (ขวา)
+  const titleCol: any = {
+    type: 'box', layout: 'vertical', spacing: 'none', justifyContent: 'center',
+    contents: [{ type: 'text', text: game.name, weight: 'bold', size: 'lg', color: GOLD_SOFT, wrap: true, maxLines: 2 }],
+  };
+  if (game.provider) titleCol.contents.push({ type: 'text', text: String(game.provider), size: 'xs', color: GOLD_DIM });
+  const titleRow: any = { type: 'box', layout: 'horizontal', spacing: 'md', alignItems: 'center', contents: [] };
+  if (game.image) {
+    titleRow.contents.push({
+      type: 'image', url: game.image, size: '58px', aspectMode: 'cover', aspectRatio: '1:1',
+      cornerRadius: '10px', flex: 0,
+    });
+  }
+  titleRow.contents.push(titleCol);
+  const body: any[] = [titleRow];
 
   // แถบอัตราชนะ + progress bar (ทอง)
   body.push({
@@ -226,13 +238,19 @@ function gameBubble(config: BTConfig, game: BTGame): any {
   const footerBtns: any[] = [];
   if (game.link) {
     footerBtns.push({
-      type: 'button', style: 'primary', color: accent, height: 'sm',
-      action: { type: 'uri', label: '🎮 เข้าเล่นเลย', uri: game.link },
+      type: 'box', layout: 'vertical', height: '46px', justifyContent: 'center', cornerRadius: '12px',
+      background: { type: 'linearGradient', angle: '90deg', startColor: '#FFE9A8', centerColor: '#FFD700', endColor: '#E8B923' },
+      action: { type: 'uri', label: 'เข้าเล่นเลย', uri: game.link },
+      contents: [{ type: 'text', text: '🎮 เข้าเล่นเลย', align: 'center', weight: 'bold', size: 'sm', color: '#231A06' }],
     });
   }
+  // ปุ่ม "เลือกค่ายอื่น" สไตล์พรีเมียม — กรอบทองเรืองบนพื้นเข้ม
   footerBtns.push({
-    type: 'button', style: 'secondary', height: 'sm',
-    action: { type: 'postback', label: '⬅️ เลือกค่ายอื่น', data: 'bt=menu', displayText: 'ดูค่ายเกมอื่น' },
+    type: 'box', layout: 'vertical', height: '46px', justifyContent: 'center', cornerRadius: '12px',
+    borderWidth: '1px', borderColor: GOLD,
+    background: { type: 'linearGradient', angle: '90deg', startColor: '#241C0A', endColor: '#12100A' },
+    action: { type: 'postback', label: 'เลือกค่ายอื่น', data: 'bt=menu', displayText: 'ดูค่ายเกมอื่น' },
+    contents: [{ type: 'text', text: '⟵  เลือกค่ายอื่น', align: 'center', weight: 'bold', size: 'sm', color: GOLD_BRIGHT }],
   });
 
   const bubble: any = {
@@ -248,8 +266,9 @@ function gameBubble(config: BTConfig, game: BTGame): any {
       contents: footerBtns,
     },
   };
-  if (game.image) {
-    bubble.hero = { type: 'image', url: game.image, size: 'full', aspectRatio: '20:13', aspectMode: 'cover' };
+  const heroUrl = game.banner || game.image;
+  if (heroUrl) {
+    bubble.hero = { type: 'image', url: heroUrl, size: 'full', aspectRatio: '20:13', aspectMode: 'cover' };
   }
   return bubble;
 }

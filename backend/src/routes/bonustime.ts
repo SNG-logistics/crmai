@@ -141,7 +141,7 @@ router.delete('/camps/:id', async (req: Request, res: Response) => {
 router.post('/games', async (req: Request, res: Response) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const { campId, name, image, winRate, freeSpinRate, wildRate, provider, languages, link, order, isActive } = req.body;
+    const { campId, name, image, banner, winRate, freeSpinRate, wildRate, provider, languages, link, order, isActive } = req.body;
     if (!campId || !name) return res.status(400).json({ success: false, message: 'กรุณาระบุค่ายและชื่อเกม' });
     const camp = await prisma.bonusTimeCamp.findFirst({ where: { id: campId, tenantId: req.tenantId! } });
     if (!camp) return res.status(404).json({ success: false, message: 'ไม่พบค่ายที่เลือก' });
@@ -151,6 +151,7 @@ router.post('/games', async (req: Request, res: Response) => {
         tenantId: req.tenantId!, companyId, campId,
         name: String(name),
         image: image || null,
+        banner: banner || null,
         winRate: clampPct(winRate, 85),
         freeSpinRate: clampPct(freeSpinRate, 70),
         wildRate: clampPct(wildRate, 75),
@@ -169,11 +170,12 @@ router.put('/games/:id', async (req: Request, res: Response) => {
   try {
     const existing = await prisma.bonusTimeGame.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
     if (!existing) return res.status(404).json({ success: false, message: 'ไม่พบเกม' });
-    const { name, image, winRate, freeSpinRate, wildRate, provider, languages, link, order, isActive, campId } = req.body;
+    const { name, image, banner, winRate, freeSpinRate, wildRate, provider, languages, link, order, isActive, campId } = req.body;
     const clampPct = (v: any) => Math.max(0, Math.min(100, parseInt(v, 10)));
     const data: any = {};
     if (name !== undefined) data.name = String(name);
     if (image !== undefined) data.image = image || null;
+    if (banner !== undefined) data.banner = banner || null;
     if (winRate !== undefined) data.winRate = clampPct(winRate);
     if (freeSpinRate !== undefined) data.freeSpinRate = clampPct(freeSpinRate);
     if (wildRate !== undefined) data.wildRate = clampPct(wildRate);

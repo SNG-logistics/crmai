@@ -5,7 +5,7 @@ import api from '../../../../lib/api';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Game {
-  id: string; campId: string; name: string; image?: string | null;
+  id: string; campId: string; name: string; image?: string | null; banner?: string | null;
   winRate: number; freeSpinRate: number; wildRate: number;
   provider?: string; languages?: string; link?: string | null; order: number; isActive: boolean;
 }
@@ -326,8 +326,13 @@ export default function BonusTimePage() {
               let langs: string[] = []; try { langs = JSON.parse(g.languages || '[]'); } catch { langs = []; }
               return (
                 <div className="bt-game" key={g.id} style={{ opacity: g.isActive ? 1 : 0.5 }}>
-                  <div className="bt-thumb" onClick={() => pickImage(url => updateGame(g.id, { image: url }))} title="อัปโหลดรูปเกม">
-                    {g.image ? <img src={g.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span>+รูป</span>}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <div className="bt-thumb" onClick={() => pickImage(url => updateGame(g.id, { image: url }))} title="ไอคอนเกม (แสดงข้างชื่อ)">
+                      {g.image ? <img src={g.image} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span>+ไอคอน</span>}
+                    </div>
+                    <div className="bt-thumb" style={{ width: 78, height: 42 }} onClick={() => pickImage(url => updateGame(g.id, { banner: url }))} title="แบนเนอร์ (รูปกราฟิกใหญ่ด้านบน)">
+                      {g.banner ? <img src={g.banner} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span>+แบนเนอร์</span>}
+                    </div>
                   </div>
 
                   <div style={{ flex: 1, minWidth: 170 }}>

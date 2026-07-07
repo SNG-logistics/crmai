@@ -664,7 +664,8 @@ model BonusTimeGame {
   camp         BonusTimeCamp @relation(fields: [campId], references: [id], onDelete: Cascade)
 
   name         String
-  image        String?                 // URL รูปเกม
+  image        String?                 // URL ไอคอนเกม (แสดงข้างชื่อ)
+  banner       String?                 // URL รูปกราฟิกใหญ่ด้านบน (แอดมินอัปเอง)
   winRate      Int      @default(85)   // อัตราชนะ %
   freeSpinRate Int      @default(70)   // โอกาสเข้าฟรีสปิน %
   wildRate     Int      @default(75)   // WILD %
