@@ -89,9 +89,18 @@ export function matchBonusTimeKeyword(text: string, config?: Pick<BTConfig, 'key
   return all.some((k) => k && t.includes(k));
 }
 
+// ─── LUX gold palette (LINE flex — โทนทองหรู) ────────────────────────────────
+const GOLD = '#E8B923';        // ทองหลัก (ขอบ/หลอด)
+const GOLD_BRIGHT = '#FFD700'; // ทองสว่าง (หัวข้อ/ตัวเลข)
+const GOLD_SOFT = '#F6E7BD';   // ครีมทอง (ตัวอักษรหลัก)
+const GOLD_DIM = '#9C8140';    // ทองหม่น (ข้อความรอง)
+const GOLD_LINE = '#4A3D14';   // เส้นขอบบาง
+const LUX_DARK = '#0A0A10';    // พื้นเข้มสุด
+const LUX_PANEL = '#17130A';   // พื้นการ์ด (โทนทอง)
+const LUX_TRACK = '#2A2410';   // รางหลอด %
+
 // ─── LINE Flex: เมนูตารางค่ายเกม ─────────────────────────────────────────────
 function campCell(camp: BTCamp): any {
-  const accent = camp.accent || '#00D4AA';
   const inner: any[] = [];
   if (camp.logo) {
     inner.push({
@@ -100,13 +109,14 @@ function campCell(camp: BTCamp): any {
   } else {
     inner.push({
       type: 'box', layout: 'vertical', height: '30px', justifyContent: 'center',
-      contents: [{ type: 'text', text: camp.name.slice(0, 2).toUpperCase(), align: 'center', weight: 'bold', size: 'lg', color: accent }],
+      contents: [{ type: 'text', text: camp.name.slice(0, 2).toUpperCase(), align: 'center', weight: 'bold', size: 'lg', color: GOLD_BRIGHT }],
     });
   }
-  inner.push({ type: 'text', text: camp.name, size: 'xs', color: '#F3F4F6', align: 'center', weight: 'bold', wrap: true, maxLines: 2, margin: 'sm' });
+  inner.push({ type: 'text', text: camp.name, size: 'xs', color: GOLD_SOFT, align: 'center', weight: 'bold', wrap: true, maxLines: 2, margin: 'sm' });
 
   return {
-    type: 'box', layout: 'vertical', flex: 1, backgroundColor: '#1F2937', cornerRadius: '10px',
+    type: 'box', layout: 'vertical', flex: 1, backgroundColor: LUX_PANEL, cornerRadius: '12px',
+    borderWidth: '2px', borderColor: GOLD,
     paddingAll: '8px', spacing: 'none', justifyContent: 'center',
     action: { type: 'postback', label: camp.name.slice(0, 20), data: `bt=camp&id=${camp.id}`, displayText: `ดูอัตราชนะค่าย ${camp.name}` },
     contents: inner,
@@ -119,7 +129,6 @@ function emptyCell(): any {
 
 /** สร้างข้อความ LINE (array) สำหรับเมนูค่ายเกม */
 export function buildBonusTimeMenuMessages(config: BTConfig, camps: BTCamp[]): any[] {
-  const accent = config.accent || '#F59E0B';
   const rows: any[] = [];
   const perRow = 3;
   for (let i = 0; i < camps.length; i += perRow) {
@@ -133,10 +142,10 @@ export function buildBonusTimeMenuMessages(config: BTConfig, camps: BTCamp[]): a
     type: 'bubble',
     size: 'mega',
     header: {
-      type: 'box', layout: 'vertical', backgroundColor: '#0F172A', paddingAll: '16px', spacing: 'xs',
+      type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '16px', spacing: 'xs',
       contents: [
-        { type: 'text', text: config.headerTitle, weight: 'bold', size: 'xl', color: accent, align: 'center', wrap: true },
-        { type: 'text', text: config.headerSubtitle, size: 'xxs', color: '#9CA3AF', align: 'center', wrap: true },
+        { type: 'text', text: config.headerTitle, weight: 'bold', size: 'xl', color: GOLD_BRIGHT, align: 'center', wrap: true },
+        { type: 'text', text: config.headerSubtitle, size: 'xxs', color: GOLD_DIM, align: 'center', wrap: true },
         {
           type: 'box', layout: 'baseline', margin: 'md', justifyContent: 'center', spacing: 'sm',
           contents: [{ type: 'text', text: '🟢 LIVE • อัปเดตเรียลไทม์', size: 'xs', color: '#10B981', weight: 'bold', align: 'center' }],
@@ -144,17 +153,17 @@ export function buildBonusTimeMenuMessages(config: BTConfig, camps: BTCamp[]): a
       ],
     },
     body: {
-      type: 'box', layout: 'vertical', backgroundColor: '#0B1220', paddingAll: '12px', spacing: 'sm',
+      type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '12px', spacing: 'sm',
       contents: [
-        { type: 'text', text: config.intro, size: 'sm', color: '#E5E7EB', wrap: true },
+        { type: 'text', text: config.intro, size: 'sm', color: GOLD_SOFT, wrap: true },
         ...rows,
       ],
     },
     footer: {
-      type: 'box', layout: 'vertical', backgroundColor: '#0B1220', paddingAll: '10px',
-      contents: [{ type: 'text', text: config.footerNote, size: 'xxs', color: '#6B7280', wrap: true, align: 'center' }],
+      type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '10px',
+      contents: [{ type: 'text', text: config.footerNote, size: 'xxs', color: GOLD_DIM, wrap: true, align: 'center' }],
     },
-    styles: { header: { separator: false }, footer: { separator: true } },
+    styles: { header: { separator: true, separatorColor: GOLD_LINE }, footer: { separator: true, separatorColor: GOLD_LINE } },
   };
 
   return [{ type: 'flex', altText: '⚡ BONUS TIME — เลือกค่ายเกมเพื่อดูอัตราชนะ', contents: bubble }];
@@ -163,35 +172,37 @@ export function buildBonusTimeMenuMessages(config: BTConfig, camps: BTCamp[]): a
 // ─── LINE Flex: การ์ดเกมในค่าย (carousel) ────────────────────────────────────
 function statBox(label: string, value: number): any {
   return {
-    type: 'box', layout: 'vertical', flex: 1, backgroundColor: '#111827', cornerRadius: '8px', paddingAll: '8px', spacing: 'none',
+    type: 'box', layout: 'vertical', flex: 1, backgroundColor: LUX_PANEL, cornerRadius: '10px',
+    borderWidth: '1px', borderColor: GOLD_LINE, paddingAll: '8px', spacing: 'none',
     contents: [
-      { type: 'text', text: `${value}%`, size: 'md', weight: 'bold', color: '#10B981', align: 'center' },
-      { type: 'text', text: label, size: 'xxs', color: '#9CA3AF', align: 'center', wrap: true },
+      { type: 'text', text: `${value}%`, size: 'md', weight: 'bold', color: GOLD_BRIGHT, align: 'center' },
+      { type: 'text', text: label, size: 'xxs', color: GOLD_DIM, align: 'center', wrap: true },
     ],
   };
 }
 
 function gameBubble(config: BTConfig, game: BTGame): any {
-  const accent = config.accent || '#F59E0B';
+  const accent = config.accent || GOLD;
   const win = jitter(game.winRate, config.liveJitter);
   const free = jitter(game.freeSpinRate, config.liveJitter);
   const wild = jitter(game.wildRate, config.liveJitter);
 
   const body: any[] = [
-    { type: 'text', text: game.name, weight: 'bold', size: 'lg', color: '#F9FAFB', wrap: true, maxLines: 2 },
+    { type: 'text', text: game.name, weight: 'bold', size: 'lg', color: GOLD_SOFT, wrap: true, maxLines: 2 },
   ];
-  if (game.provider) body.push({ type: 'text', text: String(game.provider), size: 'xs', color: '#9CA3AF' });
+  if (game.provider) body.push({ type: 'text', text: String(game.provider), size: 'xs', color: GOLD_DIM });
 
-  // แถบอัตราชนะ + progress bar
+  // แถบอัตราชนะ + progress bar (ทอง)
   body.push({
     type: 'box', layout: 'baseline', margin: 'md',
     contents: [
-      { type: 'text', text: '🔥 อัตราชนะ', size: 'sm', color: '#E5E7EB', flex: 0 },
-      { type: 'text', text: `${win}%`, size: 'sm', weight: 'bold', color: accent, align: 'end' },
+      { type: 'text', text: '🔥 อัตราชนะ', size: 'sm', color: GOLD_SOFT, flex: 0 },
+      { type: 'text', text: `${win}%`, size: 'sm', weight: 'bold', color: GOLD_BRIGHT, align: 'end' },
     ],
   });
   body.push({
-    type: 'box', layout: 'vertical', height: '10px', backgroundColor: '#374151', cornerRadius: '5px', margin: 'sm',
+    type: 'box', layout: 'vertical', height: '10px', backgroundColor: LUX_TRACK, cornerRadius: '5px', margin: 'sm',
+    borderWidth: '1px', borderColor: GOLD_LINE,
     contents: [
       { type: 'box', layout: 'vertical', width: `${win}%`, height: '10px', backgroundColor: accent, cornerRadius: '5px', contents: [{ type: 'filler' }] },
     ],
@@ -207,7 +218,7 @@ function gameBubble(config: BTConfig, game: BTGame): any {
   body.push({
     type: 'box', layout: 'baseline', margin: 'md',
     contents: [
-      { type: 'text', text: 'ภาษาที่รองรับ', size: 'xxs', color: '#9CA3AF', flex: 0 },
+      { type: 'text', text: 'ภาษาที่รองรับ', size: 'xxs', color: GOLD_DIM, flex: 0 },
       { type: 'text', text: langLine(game.languages), size: 'sm', align: 'end' },
     ],
   });
@@ -228,11 +239,12 @@ function gameBubble(config: BTConfig, game: BTGame): any {
     type: 'bubble',
     size: 'mega',
     body: {
-      type: 'box', layout: 'vertical', backgroundColor: '#0B1220', paddingAll: '14px', spacing: 'sm',
+      type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '14px', spacing: 'sm',
+      borderWidth: '2px', borderColor: GOLD,
       contents: body,
     },
     footer: {
-      type: 'box', layout: 'vertical', backgroundColor: '#0B1220', paddingAll: '10px', spacing: 'sm',
+      type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '10px', spacing: 'sm',
       contents: footerBtns,
     },
   };
