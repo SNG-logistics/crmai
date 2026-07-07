@@ -92,7 +92,8 @@ export async function processBotMessage(
     totalDeposit?: number;
     depositCount?: number;
   },
-  companyId?: string | null
+  companyId?: string | null,
+  opts?: { bonusTimeActive?: boolean }
 ): Promise<{ reply: string; shouldHandoff: boolean }> {
 
   // per-company AI: ถ้ามี companyId → โหลด config ของบริษัทนั้น ; ไม่มี → fallback ระดับ tenant
@@ -122,7 +123,14 @@ export async function processBotMessage(
     ? `\n—— ข้อมูลลูกค้า ——\nชื่อ: ${contactContext.displayName} | ประเภท: ${contactContext.memberType || 'ใหม่'} | รวมฝาก ${contactContext.totalDeposit || 0} บาท`
     : '';
 
-  const systemPrompt = `${basePrompt}${kbContext}${contactInfo}\n\n${SYSTEM_BASE}`;
+  // ─ BONUS TIME: ให้ AI เรียกระบบเองด้วยโทเคนพิเศษ ─
+  const bonusTimeInstr = opts?.bonusTimeActive
+    ? `\n\n—— ระบบ BONUS TIME (สำคัญ) ——
+ถ้าลูกค้าอยากดู "BONUSTIME" / อัตราชนะเกม / ค่ายไหนแตก / ค่ายไหนดี / เกมไหนน่าเล่น / ระบบวิเคราะห์ AI / winrate / เปอร์เซ็นต์เกม
+ให้ตอบกลับด้วยข้อความว่า [[BONUSTIME]] เพียงอย่างเดียวเท่านั้น ห้ามพิมพ์ข้อความอื่นปนมา (ระบบจะแสดงการ์ดค่ายเกมให้เอง)`
+    : '';
+
+  const systemPrompt = `${basePrompt}${kbContext}${contactInfo}\n\n${SYSTEM_BASE}${bonusTimeInstr}`;
 
   const msgs: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
     { role: 'system', content: systemPrompt },

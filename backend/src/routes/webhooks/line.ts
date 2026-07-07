@@ -5,8 +5,123 @@ import { processBotMessage, generateAIResponse } from '../../services/ai.service
 import { checkRepeatAbuse, REPEAT_HANDOFF_REPLY } from '../../services/bot-guard';
 import { emitToTenant } from '../../lib/socket';
 import { verifySlip } from '../../services/slip-verify.service';
+import { defaultCompanyId } from '../../lib/company-scope';
+import {
+  buildBonusTimeMenuMessages, buildBonusTimeGamesMessages,
+  matchBonusTimeKeyword, parseBonusPostback,
+} from '../../services/bonustime.service';
 
 const router = Router();
+
+// ════════════════════════════════════════════════════════════════════════════
+// ⚡ BONUS TIME helpers
+// ════════════════════════════════════════════════════════════════════════════
+
+// โหลด config ของบริษัท — คืน null ถ้าปิดใช้งาน/ไม่มี
+async function loadBonusConfig(companyId: string | null | undefined): Promise<any | null> {
+  if (!companyId) return null;
+  try {
+    const cfg = await prisma.bonusTimeConfig.findUnique({ where: { companyId } });
+    if (!cfg || !cfg.isActive) return null;
+    return cfg;
+  } catch { return null; }
+}
+
+// หา/สร้าง contact + conversation สำหรับ LINE userId (ใช้กับ postback)
+async function resolveLineConvo(tenantId: string, userId: string, profile: any) {
+  let contact = await prisma.contact.findUnique({
+    where: { tenantId_lineUserId: { tenantId, lineUserId: userId } },
+  });
+  if (!contact) {
+    contact = await prisma.contact.create({
+      data: { tenantId, lineUserId: userId, displayName: profile?.displayName || 'LINE User', avatar: profile?.pictureUrl },
+    });
+  }
+  let conversation = await prisma.conversation.findUnique({
+    where: { tenantId_channel_channelId: { tenantId, channel: 'line', channelId: userId } },
+  });
+  if (!conversation) {
+    const companyId = await defaultCompanyId(tenantId);
+    conversation = await prisma.conversation.create({
+      data: { tenantId, companyId, contactId: contact.id, channel: 'line', channelId: userId, status: 'bot', isBot: true },
+    });
+  }
+  return { contact, conversation };
+}
+
+interface BonusCtx {
+  tenantId: string; conversation: any; contact: any;
+  userId: string; replyToken: string | null; accessToken: string; config: any;
+}
+
+// ส่งข้อความ (reply → fallback push) + บันทึกลง DB + emit ไป inbox
+async function sendBonusMessages(ctx: BonusCtx, messages: any[]) {
+  let sent = false;
+  if (ctx.replyToken) {
+    try { await sendLineReply(ctx.replyToken, messages, ctx.accessToken); sent = true; } catch { /* try push */ }
+  }
+  if (!sent) {
+    try { await sendLinePush(ctx.userId, messages, ctx.accessToken); sent = true; } catch (e: any) {
+      console.warn('[BonusTime] send failed:', e?.response?.data?.message || e.message);
+    }
+  }
+  if (sent) {
+    const first = messages[0];
+    const isFlex = first?.type === 'flex';
+    const dbMsg = await prisma.message.create({
+      data: {
+        conversationId: ctx.conversation.id, tenantId: ctx.tenantId,
+        senderType: 'bot', type: isFlex ? 'flex' : 'text',
+        content: isFlex ? (first.altText || '[BONUS TIME]') : (first.text || ''),
+        metadata: isFlex ? JSON.stringify({ flexJson: first.contents }) : '{}',
+      },
+    });
+    emitToTenant(ctx.tenantId, 'new_message', {
+      conversationId: ctx.conversation.id,
+      message: { ...dbMsg, senderType: 'bot' },
+      contact: ctx.contact, channel: 'line',
+    });
+  }
+  return sent;
+}
+
+// ส่งเมนูค่ายเกม — คืน false ถ้ายังไม่มีค่าย (ให้ flow ปกติทำงานต่อ)
+async function sendBonusMenu(ctx: BonusCtx): Promise<boolean> {
+  const camps = await prisma.bonusTimeCamp.findMany({
+    where: { companyId: ctx.conversation.companyId, isActive: true },
+    orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+  });
+  if (!camps.length) return false;
+  const messages = buildBonusTimeMenuMessages(ctx.config, camps as any);
+  return sendBonusMessages(ctx, messages);
+}
+
+// ส่งการ์ดเกมของค่าย
+async function sendBonusGames(ctx: BonusCtx, campId: string): Promise<boolean> {
+  const camp = await prisma.bonusTimeCamp.findFirst({
+    where: { id: campId, companyId: ctx.conversation.companyId },
+  });
+  if (!camp) return sendBonusMenu(ctx);
+  const games = await prisma.bonusTimeGame.findMany({
+    where: { campId: camp.id, isActive: true },
+    orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+  });
+  const messages = buildBonusTimeGamesMessages(ctx.config, camp as any, games as any);
+  return sendBonusMessages(ctx, messages);
+}
+
+// จัดการ postback ของ BONUS TIME (กดปุ่มค่าย / กลับเมนู)
+async function handleBonusPostback(tenantId: string, event: any, userId: string, profile: any, accessToken: string) {
+  const parsed = parseBonusPostback(event.postback?.data);
+  if (!parsed) return; // postback อื่น — ไม่เกี่ยวกับ bonustime
+  const { contact, conversation } = await resolveLineConvo(tenantId, userId, profile);
+  const config = await loadBonusConfig(conversation.companyId);
+  if (!config) return;
+  const ctx: BonusCtx = { tenantId, conversation, contact, userId, replyToken: event.replyToken || null, accessToken, config };
+  if (parsed.action === 'menu') await sendBonusMenu(ctx);
+  else if (parsed.id) await sendBonusGames(ctx, parsed.id);
+  console.log(`[BonusTime] postback action=${parsed.action}${parsed.id ? ' camp=' + parsed.id : ''} conv=${conversation.id}`);
+}
 
 // ─── GET /api/webhooks/line/:tenantId ─────────────────────────────────────────
 router.get('/:tenantId', (_req: Request, res: Response) => {
@@ -400,6 +515,13 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
   let profile: any = null;
   try { profile = await getLineProfile(userId, accessToken); } catch { }
 
+  // ─── ⚡ BONUS TIME postback (กดปุ่มค่ายเกม / กลับเมนู) ─────────────────────
+  if (event.type === 'postback') {
+    try { await handleBonusPostback(tenantId, event, userId, profile, accessToken); }
+    catch (e: any) { console.error('[BonusTime] postback error:', e?.message || e); }
+    return;
+  }
+
   const normalized = parseLineEvent(event, profile);
   if (!normalized) return;
 
@@ -483,8 +605,10 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     where: { tenantId_channel_channelId: { tenantId, channel: 'line', channelId: userId } },
   });
   if (!conversation) {
+    // ผูกบริษัทเริ่มต้นของ tenant — ไม่งั้น conv จะหายไปจาก inbox เมื่อกรองตามบริษัท
+    const companyId = await defaultCompanyId(tenantId);
     conversation = await prisma.conversation.create({
-      data: { tenantId, contactId: contact.id, channel: 'line', channelId: userId, status: 'bot', isBot: true },
+      data: { tenantId, companyId, contactId: contact.id, channel: 'line', channelId: userId, status: 'bot', isBot: true },
     });
   }
 
@@ -610,6 +734,23 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     });
     console.log(`[LINE Bot] 🛡️ Repeat abuse → handoff conversation=${conversation.id} count=${abuse.count}`);
     return;
+  }
+
+  // ⚡ BONUS TIME — โหลด config ครั้งเดียว (ใช้ทั้ง fast-path และ AI-token)
+  const btConfig = await loadBonusConfig(conversation.companyId);
+
+  // ✅ BONUS TIME fast-path: ลูกค้าพิมพ์คีย์เวิร์ดตรงๆ → โชว์เมนูค่ายเกมทันที
+  if (btConfig && matchBonusTimeKeyword(normalized.content, btConfig)) {
+    const ctx: BonusCtx = {
+      tenantId, conversation, contact, userId,
+      replyToken: normalized.replyToken || null, accessToken, config: btConfig,
+    };
+    const ok = await sendBonusMenu(ctx);
+    if (ok) {
+      console.log(`[BonusTime] ⚡ keyword trigger → menu conv=${conversation.id}`);
+      return;
+    }
+    // ยังไม่มีค่ายในระบบ → ปล่อยให้ flow ปกติทำงานต่อ
   }
 
   // ✅ ตรวจสอบ: ถามว่าเกมไหนแตก → สุ่มแนะนำเกมตามช่วงเวลา
@@ -816,16 +957,32 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
         memberType: (contact as any).memberType,
         totalDeposit: (contact as any).totalDeposit,
         depositCount: (contact as any).depositCount,
-      }
+      },
+      conversation.companyId,
+      { bonusTimeActive: !!btConfig },
     );
 
-    console.log(`[LINE Bot] tenant=${tenantId} reply="${reply.substring(0, 60)}" handoff=${shouldHandoff}`);
+    // ⚡ AI ตัดสินใจเรียก BONUS TIME เอง (ตอบด้วยโทเคน [[BONUSTIME]])
+    if (btConfig && /\[\[BONUSTIME\]\]/i.test(reply)) {
+      const ctx: BonusCtx = {
+        tenantId, conversation, contact, userId,
+        replyToken: normalized.replyToken || null, accessToken, config: btConfig,
+      };
+      if (await sendBonusMenu(ctx)) {
+        console.log(`[LINE Bot] ⚡ AI-triggered BONUS TIME menu conv=${conversation.id}`);
+        return;
+      }
+    }
+    // ตัดโทเคนออกก่อนส่ง (กันกรณีไม่มีค่าย/ตกหล่น)
+    const cleanReply = reply.replace(/\[\[BONUSTIME\]\]/gi, '').trim() || 'ได้รับข้อความแล้วนะคะ 🙏';
+
+    console.log(`[LINE Bot] tenant=${tenantId} reply="${cleanReply.substring(0, 60)}" handoff=${shouldHandoff}`);
 
     let sent = false;
 
     if (normalized.replyToken) {
       try {
-        await sendLineReply(normalized.replyToken, [lineBotReplyMessage(reply)], accessToken);
+        await sendLineReply(normalized.replyToken, [lineBotReplyMessage(cleanReply)], accessToken);
         sent = true;
         console.log(`[LINE Bot] ✅ Reply sent via replyToken`);
       } catch (replyErr: any) {
@@ -835,7 +992,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
 
     if (!sent) {
       try {
-        await sendLinePush(userId, [lineBotReplyMessage(reply)], accessToken);
+        await sendLinePush(userId, [lineBotReplyMessage(cleanReply)], accessToken);
         sent = true;
         console.log(`[LINE Bot] ✅ Reply sent via Push API`);
       } catch (pushErr: any) {
@@ -845,7 +1002,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
 
     if (sent) {
       const botReply = await prisma.message.create({
-        data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: reply },
+        data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: cleanReply },
       });
       emitToTenant(tenantId, 'new_message', {
         conversationId: conversation.id,

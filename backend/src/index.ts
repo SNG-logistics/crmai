@@ -32,6 +32,7 @@ import auditRoutes from './routes/audit';
 import slipRoutes from './routes/slips';
 import uploadRoutes from './routes/upload';
 import lineContentRoutes from './routes/line-content';
+import bonusTimeRoutes from './routes/bonustime';
 import { initWhatsAppSessions } from './services/whatsapp.service';
 import { startPkmListener } from './services/pkm-listener.service';
 import { isFirebaseEnabled, firebaseInitError } from './lib/firebase-admin';
@@ -147,6 +148,7 @@ app.use('/api/audit',      auditRoutes);
 app.use('/api/slips',      slipRoutes);
 app.use('/api/upload',     uploadRoutes);
 app.use('/api/line',       lineContentRoutes);
+app.use('/api/bonustime',  bonusTimeRoutes);
 
 
 
@@ -202,4 +204,4 @@ async function main() {
 process.on('SIGTERM', () => { console.log('SIGTERM received, shutting down...'); httpServer.close(() => process.exit(0)); });
 process.on('SIGINT', () => { console.log('SIGINT received, shutting down...'); httpServer.close(() => process.exit(0)); });
 
-main();
+main(); // bootstrap

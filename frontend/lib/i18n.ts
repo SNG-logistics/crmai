@@ -24,6 +24,7 @@ export const translations = {
   nav_profile:         { th: 'โปรไฟล์ & 2FA',        lo: 'ໂປຣໄຟລ໌ & 2FA' },
   nav_audit_logs:      { th: 'ประวัติระบบ',          lo: 'ປະຫວັດລະບົບ' },
   nav_lufy:            { th: 'ลิงก์ (lufy.cc)',       lo: 'ລິ້ງ (lufy.cc)' },
+  nav_bonustime:       { th: '⚡ BONUS TIME',          lo: '⚡ BONUS TIME' },
   nav_settings:        { th: 'ตั้งค่า',              lo: 'ຕັ້ງຄ່າ' },
 
   // ── Common Buttons ───────────────────────────────────────────────────────────

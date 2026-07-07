@@ -44,6 +44,9 @@ model Tenant {
   slipVerifications SlipVerification[]
   companies         Company[]
   whatsappAccounts  WhatsAppAccount[]
+  bonusTimeConfigs  BonusTimeConfig[]
+  bonusTimeCamps    BonusTimeCamp[]
+  bonusTimeGames    BonusTimeGame[]
 }
 
 // =============================================
@@ -598,4 +601,82 @@ model SlipVerification {
   @@index([tenantId])
   @@index([imageHash])
   @@index([transRef])
+}
+
+// =============================================
+// ★ BONUS TIME — AI Winrate System (LINE OA)
+// =============================================
+
+// การตั้งค่าระบบ BONUSTIME ต่อบริษัท (1 company = 1 config)
+model BonusTimeConfig {
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId     String?  @unique // per-company config (เหมือน BotConfig)
+
+  isActive      Boolean  @default(true)
+  headerTitle   String   @default("⚡ BONUS TIME ⚡")
+  headerSubtitle String  @default("AI WINRATE SYSTEM • LIVE อัปเดต Real-Time")
+  intro         String   @default("เลือกค่ายเกมที่ต้องการดูอัตราชนะแบบเรียลไทม์ได้เลยค่ะ 👇")
+  gamesIntro    String   @default("อัตราชนะล่าสุดของค่ายนี้ค่ะ กดปุ่มด้านล่างเพื่อดูค่ายอื่นได้นะคะ ✨")
+  footerNote    String   @default("* อัตราอ้างอิงจากสถิติระบบ ไม่ใช่การรับประกันผล")
+
+  aiTrigger     Boolean  @default(true)  // ให้ AI ตัดสินใจเรียกระบบเอง
+  keywords      String   @default("[]")  // JSON array คีย์เวิร์ดเสริม (fast-path)
+  liveJitter    Int      @default(4)     // ±% สุ่มขยับให้ดู LIVE (0 = ปิด)
+  accent        String   @default("#F59E0B")
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([tenantId])
+}
+
+// ค่ายเกม (PG SOFT, JILI, PRAGMATIC ...)
+model BonusTimeCamp {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId String?
+
+  name      String            // ชื่อค่าย เช่น "JILI"
+  code      String            // slug เช่น "jili"
+  logo      String?           // URL รูปโลโก้ค่าย
+  accent    String   @default("#00D4AA")
+  order     Int      @default(0)
+  isActive  Boolean  @default(true)
+
+  games     BonusTimeGame[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([companyId])
+}
+
+// เกมในค่าย พร้อมค่า % (อัตราชนะ / ฟรีสปิน / WILD)
+model BonusTimeGame {
+  id           String   @id @default(cuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId    String?
+  campId       String
+  camp         BonusTimeCamp @relation(fields: [campId], references: [id], onDelete: Cascade)
+
+  name         String
+  image        String?                 // URL รูปเกม
+  winRate      Int      @default(85)   // อัตราชนะ %
+  freeSpinRate Int      @default(70)   // โอกาสเข้าฟรีสปิน %
+  wildRate     Int      @default(75)   // WILD %
+  provider     String   @default("")   // ป้ายค่าย/ผู้พัฒนา (แสดงในการ์ด)
+  languages    String   @default("[\"TH\"]") // JSON เช่น ["TH","EN"]
+  link         String?                 // ลิงก์เข้าเล่น (ถ้ามี)
+  order        Int      @default(0)
+  isActive     Boolean  @default(true)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([campId])
 }

@@ -22,6 +22,7 @@ const NAV_KEYS = [
   { href: '/flex',             icon: '✉️', key: 'nav_flex'       },
   { href: '/pkm',             icon: '🎰', key: 'nav_pkm'        },
   { href: '/lufy',            icon: '🔗', key: 'nav_lufy'       },
+  { href: '/settings/bonustime', icon: '⚡', key: 'nav_bonustime' },
   { href: '/settings/import',  icon: '📥', key: 'nav_import'     },
   { href: '/settings/sms',     icon: '📱', key: 'nav_sms'        },
   { href: '/settings/channels', icon: '📡', key: 'nav_channels'  },
