@@ -171,6 +171,11 @@ export function buildBonusTimeMenuMessages(config: BTConfig, camps: BTCamp[]): a
 }
 
 // ─── LINE Flex: การ์ดเกมในค่าย (carousel) ────────────────────────────────────
+// LINE Flex รองรับเฉพาะรูป JPEG/PNG (ไม่รองรับ WebP) — ถ้าไม่ใช่ให้คืน null (ข้ามรูปนั้น)
+function flexImg(u?: string | null): string | null {
+  return (u && /\.(png|jpe?g)(\?.*)?$/i.test(u)) ? u : null;
+}
+
 function statBox(label: string, value: number): any {
   return {
     type: 'box', layout: 'vertical', flex: 1, backgroundColor: LUX_PANEL, cornerRadius: '10px',
@@ -195,9 +200,10 @@ function gameBubble(config: BTConfig, game: BTGame): any {
   };
   if (game.provider) titleCol.contents.push({ type: 'text', text: String(game.provider), size: 'xs', color: GOLD_DIM });
   const titleRow: any = { type: 'box', layout: 'horizontal', spacing: 'md', alignItems: 'center', contents: [] };
-  if (game.image) {
+  const iconUrl = flexImg(game.image) || flexImg(game.banner);
+  if (iconUrl) {
     titleRow.contents.push({
-      type: 'image', url: game.image, size: '58px', aspectMode: 'cover', aspectRatio: '1:1',
+      type: 'image', url: iconUrl, size: '58px', aspectMode: 'cover', aspectRatio: '1:1',
       cornerRadius: '10px', flex: 0,
     });
   }
@@ -266,7 +272,7 @@ function gameBubble(config: BTConfig, game: BTGame): any {
       contents: footerBtns,
     },
   };
-  const heroUrl = game.banner || game.image;
+  const heroUrl = flexImg(game.banner) || flexImg(game.image);
   if (heroUrl) {
     bubble.hero = { type: 'image', url: heroUrl, size: 'full', aspectRatio: '20:13', aspectMode: 'cover' };
   }
