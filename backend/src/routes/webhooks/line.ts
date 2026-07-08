@@ -700,11 +700,16 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
   // ════════════════════════════════════════════════════════════════════════════
   if (normalized.messageType !== 'text') return;
 
+  // ⚡ BONUS TIME — โหลด config ครั้งเดียว (ใช้ทั้ง exemption, fast-path และ AI-token)
+  const btConfig = await loadBonusConfig(conversation.companyId);
+  // คำถามเกี่ยวกับเกมแตก / bonustime / อัตราชนะ → "ตอบเสมอ" ไม่นับ repeat-abuse ไม่ handoff
+  const isGameQuery = isHotGamesQuery(normalized.content) || (btConfig ? matchBonusTimeKeyword(normalized.content, btConfig) : false);
+
   // ════════════════════════════════════════════════════════════════════════════
-  // 🛡️ กันสแปม/มือบ่อนถามซ้ำความหมายเดิมเพื่อเผา token
-  //     → ตอบ auto ครั้งเดียว แล้วสลับเป็น human ทันที (ไม่เรียก AI อีก)
+  // 🛡️ กันสแปม/มือบ่อนถามซ้ำความหมายเดิม ≥10 ครั้ง/นาที → สลับเป็น human
+  //     (ยกเว้นคำถามเกี่ยวกับเกม — ตอบเสมอ)
   // ════════════════════════════════════════════════════════════════════════════
-  const abuse = await checkRepeatAbuse(conversation.id, normalized.content);
+  const abuse = isGameQuery ? { repeat: false, count: 0 } : await checkRepeatAbuse(conversation.id, normalized.content);
   if (abuse.repeat) {
     const reply = REPEAT_HANDOFF_REPLY;
     try {
@@ -735,9 +740,6 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     console.log(`[LINE Bot] 🛡️ Repeat abuse → handoff conversation=${conversation.id} count=${abuse.count}`);
     return;
   }
-
-  // ⚡ BONUS TIME — โหลด config ครั้งเดียว (ใช้ทั้ง fast-path และ AI-token)
-  const btConfig = await loadBonusConfig(conversation.companyId);
 
   // ✅ BONUS TIME fast-path: ลูกค้าพิมพ์คีย์เวิร์ดตรงๆ → โชว์เมนูค่ายเกมทันที
   if (btConfig && matchBonusTimeKeyword(normalized.content, btConfig)) {

@@ -273,12 +273,27 @@ function gameBubble(config: BTConfig, game: BTGame): any {
   return bubble;
 }
 
-/** สร้างข้อความ LINE (array) สำหรับการ์ดเกมในค่าย */
+/** สุ่มเลือกเกม N ตัว — เปลี่ยนชุดใหม่ทุก 1 นาที (seed จากนาทีปัจจุบัน) */
+function pickRotatingGames(games: BTGame[], count: number): BTGame[] {
+  if (games.length <= count) return games;
+  let seed = Math.floor(Date.now() / 60000) + games.length; // เปลี่ยนทุก 1 นาที
+  const arr = games.slice();
+  for (let i = arr.length - 1; i > 0; i--) {                  // Fisher-Yates seeded (LCG)
+    seed = (seed * 9301 + 49297) % 233280;
+    const j = Math.floor((seed / 233280) * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr.slice(0, count);
+}
+
+/** สร้างข้อความ LINE (array) สำหรับการ์ดเกมในค่าย
+ *  โชว์แค่ 6 เกม/ครั้ง (กันการ์ดใหญ่เกิน LINE โหลดไม่ขึ้น) สุ่มชุดใหม่ทุก 1 นาที, % สุ่มทุกครั้งที่กด */
 export function buildBonusTimeGamesMessages(config: BTConfig, camp: BTCamp, games: BTGame[]): any[] {
   if (!games.length) {
     return [{ type: 'text', text: `ค่าย ${camp.name} ยังไม่มีข้อมูลเกมในระบบนะคะ 🙏 ลองเลือกค่ายอื่นได้เลยค่ะ` }];
   }
-  const bubbles = games.slice(0, 12).map((g) => gameBubble(config, g));
+  const picked = pickRotatingGames(games, 6);
+  const bubbles = picked.map((g) => gameBubble(config, g));
   const carousel = { type: 'carousel', contents: bubbles };
   return [{ type: 'flex', altText: `อัตราชนะค่าย ${camp.name} (LIVE)`, contents: carousel }];
 }

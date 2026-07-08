@@ -16,9 +16,10 @@
  */
 import prisma from '../lib/prisma';
 
-const GUARD_ENABLED   = process.env.BOT_REPEAT_GUARD !== 'false';
-const REPEAT_THRESHOLD = parseInt(process.env.BOT_REPEAT_THRESHOLD || '3', 10);
-const REPEAT_WINDOW    = parseInt(process.env.BOT_REPEAT_WINDOW || '6', 10);
+const GUARD_ENABLED    = process.env.BOT_REPEAT_GUARD !== 'false';
+const REPEAT_THRESHOLD = parseInt(process.env.BOT_REPEAT_THRESHOLD || '10', 10);   // ถามซ้ำครบกี่ครั้งใน 1 นาที → สลับ human
+const REPEAT_WINDOW_SEC = parseInt(process.env.BOT_REPEAT_WINDOW_SEC || '60', 10); // หน้าต่างเวลา (วินาที)
+const REPEAT_TAKE      = parseInt(process.env.BOT_REPEAT_TAKE || '40', 10);        // ดูข้อความลูกค้าย้อนหลังสูงสุดกี่ข้อความในหน้าต่างเวลา
 const MIN_LEN          = parseInt(process.env.BOT_REPEAT_MINLEN || '6', 10);
 const SIMILARITY       = parseFloat(process.env.BOT_REPEAT_SIMILARITY || '0.8');
 
@@ -75,10 +76,12 @@ export async function checkRepeatAbuse(conversationId: string, currentText: stri
   const cur = normalize(currentText);
   if (cur.length < MIN_LEN) return { repeat: false, count: 0 }; // สั้นเกินไป ไม่นับ
 
+  // นับเฉพาะข้อความลูกค้าใน "หน้าต่างเวลา" ล่าสุด (เช่น 60 วินาที) — เป็นการวัดอัตราต่อนาที
+  const since = new Date(Date.now() - REPEAT_WINDOW_SEC * 1000);
   const recent = await prisma.message.findMany({
-    where: { conversationId, senderType: 'customer' },
+    where: { conversationId, senderType: 'customer', createdAt: { gte: since } },
     orderBy: { createdAt: 'desc' },
-    take: REPEAT_WINDOW,
+    take: REPEAT_TAKE,
     select: { content: true },
   });
 
