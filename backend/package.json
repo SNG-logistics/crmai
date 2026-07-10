@@ -16,7 +16,8 @@
     "backfill-company": "ts-node-dev --transpile-only src/scripts/backfill-company.ts",
     "wipe-customers": "ts-node-dev --transpile-only src/scripts/wipe-customers.ts",
     "provision-user": "ts-node-dev --transpile-only src/scripts/provision-user.ts",
-    "export-line-ids": "ts-node-dev --transpile-only src/scripts/export-line-ids.ts"
+    "export-line-ids": "ts-node-dev --transpile-only src/scripts/export-line-ids.ts",
+    "import-games": "ts-node-dev --transpile-only src/scripts/import-games.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.8.0",

@@ -204,7 +204,7 @@ function gameBubble(config: BTConfig, game: BTGame): any {
   if (iconUrl) {
     titleRow.contents.push({
       type: 'image', url: iconUrl, size: '58px', aspectMode: 'cover', aspectRatio: '1:1',
-      cornerRadius: '10px', flex: 0,
+      flex: 0,
     });
   }
   titleRow.contents.push(titleCol);

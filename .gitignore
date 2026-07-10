@@ -53,9 +53,13 @@ Thumbs.db
 *.tsbuildinfo
 tsconfig.tsbuildinfo
 
-# Uploads
-backend/uploads/
+# Uploads (ยกเว้นรูปเกม — ต้อง push ขึ้น repo เพื่อ deploy)
+backend/uploads/*
+!backend/uploads/games/
 
 # Coverage
 coverage/
 .nyc_output/
+
+# Claude session
+.claude/

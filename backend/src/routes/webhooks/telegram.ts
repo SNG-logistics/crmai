@@ -3,6 +3,7 @@ import prisma from '../../lib/prisma';
 import { parseTelegramUpdate, sendTelegramMessage } from '../../services/telegram.service';
 import { processBotMessage } from '../../services/ai.service';
 import { emitToTenant } from '../../lib/socket';
+import { defaultCompanyId } from '../../lib/company-scope';
 
 const router = Router();
 
@@ -91,8 +92,10 @@ router.post('/:tenantId', async (req: Request, res: Response) => {
       where: { tenantId_channel_channelId: { tenantId, channel: 'telegram', channelId: chatId } },
     });
     if (!conversation) {
+      // ผูกบริษัทเริ่มต้นของ tenant — ไม่งั้น conv จะหายไปจาก inbox เมื่อกรองตามบริษัท
+      const companyId = await defaultCompanyId(tenantId);
       conversation = await prisma.conversation.create({
-        data: { tenantId, contactId: contact.id, channel: 'telegram', channelId: chatId, status: 'bot', isBot: true },
+        data: { tenantId, companyId, contactId: contact.id, channel: 'telegram', channelId: chatId, status: 'bot', isBot: true },
       });
     }
 
