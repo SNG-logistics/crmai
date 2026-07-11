@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
 import { setTelegramWebhook, getTelegramBotInfo } from '../services/telegram.service';
+import { getChannelConfig } from '../lib/channel-config';
 import axios from 'axios';
 
 const router = Router();
@@ -14,27 +15,56 @@ function parseConfig(raw: any): any {
   return raw;
 }
 
-// ─── GET /api/channels ────────────────────────────────────────────────────────
+// ─── Helper: companyId จาก query/body (ตรวจว่าเป็นของ tenant นี้จริง) ─────────
+async function resolveCompany(req: Request): Promise<string | null> {
+  const q = ((req.query.companyId || req.body?.companyId) as string | undefined) || '';
+  if (!q) return null;
+  const c = await prisma.company.findFirst({ where: { id: q, tenantId: req.tenantId! }, select: { id: true } });
+  return c ? c.id : null;
+}
+
+// upsert config ต่อ [tenant, channel, company]
+async function upsertChannel(tenantId: string, channel: string, companyId: string | null, config: string) {
+  const existing = await prisma.channelConfig.findFirst({ where: { tenantId, channel, companyId } });
+  if (existing) {
+    return prisma.channelConfig.update({ where: { id: existing.id }, data: { isActive: true, config } });
+  }
+  return prisma.channelConfig.create({ data: { tenantId, channel, companyId, isActive: true, config } });
+}
+
+// ─── GET /api/channels?companyId= ────────────────────────────────────────────
+// ไม่ส่ง companyId = config กลางของ tenant ; ส่ง = config ของบริษัทนั้น (บอกด้วยว่า fallback ไหม)
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const channels = await prisma.channelConfig.findMany({ where: { tenantId: req.tenantId } });
-    const sanitized = channels.map((c: any) => ({
-      ...c,
-      // ส่งกลับเฉพาะ flag ว่า configured หรือไม่ (ไม่ส่ง secret/token กลับ)
+    const companyId = await resolveCompany(req);
+    const list = await prisma.channelConfig.findMany({ where: { tenantId: req.tenantId!, companyId } });
+    const channels = list.map((c: any) => ({
+      channel: c.channel, isActive: c.isActive, companyId: c.companyId,
       config: { configured: true, channel: c.channel },
+      scope: companyId ? 'company' : 'tenant',
     }));
-    res.json({ success: true, channels: sanitized });
+    // ช่องทางที่บริษัทนี้ยังไม่ได้ตั้งเอง แต่มี config กลางใช้แทน (fallback)
+    if (companyId) {
+      const defaults = await prisma.channelConfig.findMany({ where: { tenantId: req.tenantId!, companyId: null } });
+      for (const d of defaults) {
+        if (!channels.some(c => c.channel === d.channel)) {
+          channels.push({ channel: d.channel, isActive: d.isActive, companyId: null, config: { configured: true, channel: d.channel }, scope: 'fallback' });
+        }
+      }
+    }
+    res.json({ success: true, channels });
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-// ─── GET /api/channels/webhook-url ───────────────────────────────────────────
-// คืน Webhook URL สำหรับ tenant นี้
+// ─── GET /api/channels/webhook-url?companyId= ────────────────────────────────
 router.get('/webhook-url', async (req: Request, res: Response) => {
   const base = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
+  const companyId = await resolveCompany(req);
+  const suffix = companyId ? `/${companyId}` : '';
   res.json({
     success: true,
-    line:     `${base}/api/webhooks/line/${req.tenantId}`,
-    telegram: `${base}/api/webhooks/telegram/${req.tenantId}`,
+    line:     `${base}/api/webhooks/line/${req.tenantId}${suffix}`,
+    telegram: `${base}/api/webhooks/telegram/${req.tenantId}${suffix}`,
     note: process.env.BACKEND_URL
       ? 'ใช้ได้เลย'
       : '⚠️ Development mode — LINE ต้องการ HTTPS จาก internet (ใช้ ngrok)',
@@ -64,15 +94,11 @@ router.post('/line', async (req: Request, res: Response) => {
       console.warn('LINE verify warning:', e.message);
     }
 
+    const companyId = await resolveCompany(req);
     const base = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
-    const webhookUrl = `${base}/api/webhooks/line/${req.tenantId}`;
+    const webhookUrl = `${base}/api/webhooks/line/${req.tenantId}${companyId ? `/${companyId}` : ''}`;
 
-    // ★ Fix: stringify config for SQLite storage
-    await prisma.channelConfig.upsert({
-      where:  { tenantId_channel: { tenantId: req.tenantId!, channel: 'line' } },
-      create: { tenantId: req.tenantId!, channel: 'line', isActive: true, config: JSON.stringify({ channelSecret, accessToken }) },
-      update: { isActive: true, config: JSON.stringify({ channelSecret, accessToken }) },
-    });
+    await upsertChannel(req.tenantId!, 'line', companyId, JSON.stringify({ channelSecret, accessToken }));
 
     res.json({
       success: true,
@@ -117,9 +143,8 @@ router.post('/line/verify', async (req: Request, res: Response) => {
 // ─── POST /api/channels/line/sync-followers ──────────────────────────────────
 router.post('/line/sync-followers', async (req: Request, res: Response) => {
   try {
-    const channelConfig = await prisma.channelConfig.findUnique({
-      where: { tenantId_channel: { tenantId: req.tenantId!, channel: 'line' } },
-    });
+    const syncCompanyId = await resolveCompany(req);
+    const channelConfig = await getChannelConfig(req.tenantId!, 'line', syncCompanyId);
 
     if (!channelConfig || !channelConfig.isActive) {
       return res.status(400).json({ success: false, message: 'กรุณาเชื่อมต่อ LINE OA ก่อน' });
@@ -239,18 +264,14 @@ router.post('/telegram', async (req: Request, res: Response) => {
     if (!botToken)
       return res.status(400).json({ success: false, message: 'กรุณาใส่ Bot Token' });
 
+    const companyId  = await resolveCompany(req);
     const botInfo    = await getTelegramBotInfo(botToken);
     const base       = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
-    const webhookUrl = `${base}/api/webhooks/telegram/${req.tenantId}`;
+    const webhookUrl = `${base}/api/webhooks/telegram/${req.tenantId}${companyId ? `/${companyId}` : ''}`;
 
     await setTelegramWebhook(botToken, webhookUrl);
 
-    // ★ Fix: stringify config for SQLite
-    await prisma.channelConfig.upsert({
-      where:  { tenantId_channel: { tenantId: req.tenantId!, channel: 'telegram' } },
-      create: { tenantId: req.tenantId!, channel: 'telegram', isActive: true, config: JSON.stringify({ botToken, botUsername: botInfo.username }) },
-      update: { isActive: true, config: JSON.stringify({ botToken, botUsername: botInfo.username }) },
-    });
+    await upsertChannel(req.tenantId!, 'telegram', companyId, JSON.stringify({ botToken, botUsername: botInfo.username }));
 
     res.json({
       success: true,
@@ -263,13 +284,15 @@ router.post('/telegram', async (req: Request, res: Response) => {
   }
 });
 
-// ─── DELETE /api/channels/:channel ───────────────────────────────────────────
+// ─── DELETE /api/channels/:channel?companyId= ────────────────────────────────
 router.delete('/:channel', async (req: Request, res: Response) => {
   try {
-    await prisma.channelConfig.update({
-      where: { tenantId_channel: { tenantId: req.tenantId!, channel: req.params.channel } },
-      data:  { isActive: false },
+    const companyId = await resolveCompany(req);
+    const existing = await prisma.channelConfig.findFirst({
+      where: { tenantId: req.tenantId!, channel: req.params.channel, companyId },
     });
+    if (!existing) return res.status(404).json({ success: false, message: 'ไม่พบการเชื่อมต่อของบริษัทนี้' });
+    await prisma.channelConfig.update({ where: { id: existing.id }, data: { isActive: false } });
     res.json({ success: true, message: 'ปิดการเชื่อมต่อแล้ว' });
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
 });

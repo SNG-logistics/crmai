@@ -1325,6 +1325,35 @@ function AiAdminPanel({ conv, messages, onUseDraft, onResolve, onToggleBot }: {
               </div>
             ))}
 
+            {/* ─── ข้อมูลที่ลูกค้าแจ้งไว้ (บันทึกอัตโนมัติจากแชท) ─── */}
+            {(() => {
+              let prof: any = {};
+              try { prof = JSON.parse(contact.customFields || '{}')?.crm_profile || {}; } catch { prof = {}; }
+              const rows = [
+                prof.fullName     && { icon: '🪪', label: 'ชื่อ-สกุล', val: prof.fullName },
+                prof.phone        && { icon: '📱', label: 'เบอร์', val: prof.phone },
+                prof.bankName     && { icon: '🏦', label: 'ธนาคาร', val: prof.bankName },
+                prof.bankAccount  && { icon: '💳', label: 'เลขบัญชี', val: prof.bankAccount },
+                prof.gameUsername && { icon: '🎮', label: 'ยูสเซอร์', val: prof.gameUsername },
+              ].filter(Boolean) as any[];
+              if (!rows.length) return null;
+              return (
+                <div style={{ marginTop: 12, background: 'var(--bg-tertiary)', borderRadius: 8, padding: '10px 12px' }}>
+                  <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--teal)', marginBottom: 6 }}>
+                    💾 ข้อมูลที่ลูกค้าแจ้ง (บันทึกอัตโนมัติ)
+                    {prof.updatedAt && <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6 }}>{new Date(prof.updatedAt).toLocaleDateString('th-TH')}</span>}
+                  </div>
+                  {rows.map((r, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, padding: '3px 0', fontSize: '0.78rem' }}>
+                      <span>{r.icon}</span>
+                      <span style={{ color: 'var(--text-muted)', minWidth: 62 }}>{r.label}</span>
+                      <span style={{ color: 'var(--text-secondary)', fontWeight: 600, wordBreak: 'break-all' }}>{r.val}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
             <div style={{ marginTop: 12 }}>
               <button className="btn btn-secondary btn-sm" style={{ width: '100%', justifyContent: 'flex-start', marginBottom: 6 }}
                 onClick={() => window.open(`/contacts/${contact.id}`, '_blank')}>👤 ดูโปรไฟล์เต็ม →</button>

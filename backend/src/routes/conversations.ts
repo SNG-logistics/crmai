@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
+import { getChannelConfig } from '../lib/channel-config';
 import { verifyToken } from '../middleware/auth';
 import { emitToTenant, emitToConversation } from '../lib/socket';
 import { generateReplySuggestion, generateContextualReply, summarizeConversation, detectAndTranslate, enchantReply } from '../services/ai.service';
@@ -154,10 +155,8 @@ router.post('/:id/messages', async (req: Request, res: Response) => {
     const allowed = await getUserCompanyIds(req.user!.id);
     if (!canAccessCompany(allowed, conversation.companyId)) return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์ตอบบทสนทนาของบริษัทนี้' });
 
-    // Send to platform
-    const channelConfig = await prisma.channelConfig.findUnique({
-      where: { tenantId_channel: { tenantId: req.tenantId!, channel: conversation.channel } },
-    });
+    // Send to platform — ใช้ช่องทางของบริษัทที่ห้องแชทนี้สังกัด (fallback = config กลาง)
+    const channelConfig = await getChannelConfig(req.tenantId!, conversation.channel, (conversation as any).companyId);
     // ★ Fix: SQLite stores JSON as string
     let cfg: any = channelConfig?.config;
     if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg); } catch { cfg = {}; } }
@@ -382,9 +381,7 @@ router.post('/:id/sync-line', async (req: Request, res: Response) => {
     let notesInjected = 0;
 
     // ─── 1. ดึง LINE Profile ล่าสุด ──────────────────────────────────────────
-    const channelConfig = await prisma.channelConfig.findUnique({
-      where: { tenantId_channel: { tenantId: req.tenantId!, channel: 'line' } },
-    });
+    const channelConfig = await getChannelConfig(req.tenantId!, 'line', (conv as any)?.companyId);
 
     if (channelConfig?.isActive) {
       let cfg: any = channelConfig.config;

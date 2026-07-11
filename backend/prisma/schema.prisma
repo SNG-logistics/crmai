@@ -105,6 +105,7 @@ model Company {
   conversations    Conversation[]
   botConfigs       BotConfig[]
   members          UserCompany[]
+  channelConfigs   ChannelConfig[]
 
   @@unique([tenantId, name])
 }
@@ -151,13 +152,16 @@ model ChannelConfig {
   id        String   @id @default(cuid())
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId String?  // บริษัทเจ้าของช่องทางนี้ (null = ช่องทางกลางของ tenant)
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   channel   String   // line, telegram, webchat
   isActive  Boolean  @default(true)
   config    String   // channel-specific config (tokens, secrets etc)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([tenantId, channel])
+  @@unique([tenantId, channel, companyId])
+  @@index([tenantId, channel])
 }
 
 // =============================================

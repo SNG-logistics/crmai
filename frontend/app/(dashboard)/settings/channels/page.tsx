@@ -27,18 +27,37 @@ export default function ChannelsPage() {
   const [tgSaving, setTgSaving] = useState(false);
   const [tgBotInfo, setTgBotInfo] = useState<any>(null);
 
-  useEffect(() => {
+  // ─── ตั้งค่าแยกตามบริษัท ───
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [companyId, setCompanyId] = useState<string>(''); // '' = ช่องทางกลางของ tenant
+
+  const loadChannels = (cid: string) => {
+    setLoading(true);
+    const params = cid ? { companyId: cid } : {};
     Promise.all([
-      api.get('/channels').catch(() => ({ data: { channels: [] } })),
-      api.get('/channels/webhook-url').catch(() => ({ data: {} })),
+      api.get('/channels', { params }).catch(() => ({ data: { channels: [] } })),
+      api.get('/channels/webhook-url', { params }).catch(() => ({ data: {} })),
     ]).then(([chRes, whRes]) => {
       setChannels(chRes.data.channels || []);
       setWebhookUrls(whRes.data);
       setLoading(false);
     });
+  };
+
+  useEffect(() => {
+    api.get('/companies').then(r => setCompanies(r.data.companies || [])).catch(() => {});
+    loadChannels('');
   }, []);
 
+  const switchCompany = (cid: string) => {
+    setCompanyId(cid);
+    setLineBotInfo(null); setTgBotInfo(null);
+    loadChannels(cid);
+  };
+
+  const chOf = (ch: string) => channels.find(c => c.channel === ch);
   const isConnected = (ch: string) => channels.some(c => c.channel === ch && c.isActive);
+  const isFallback = (ch: string) => (chOf(ch) as any)?.scope === 'fallback';
 
   // ── LINE ───────────────────────────────────────────────────────
   const verifyLine = async () => {
@@ -58,11 +77,11 @@ export default function ChannelsPage() {
     setLineSaving(true);
     const tid = toast.loading('กำลังบันทึก...');
     try {
-      const r = await api.post('/channels/line', { channelSecret: lineSecret, accessToken: lineToken });
+      const r = await api.post('/channels/line', { channelSecret: lineSecret, accessToken: lineToken, companyId: companyId || undefined });
       toast.success(r.data.message || 'สำเร็จ', { id: tid });
       setChannels(prev => {
         const existing = prev.filter(c => c.channel !== 'line');
-        return [...existing, { channel: 'line', isActive: true, config: { configured: true } }];
+        return [...existing, { channel: 'line', isActive: true, config: { configured: true }, scope: companyId ? 'company' : 'tenant' } as any];
       });
     } catch (e: any) {
       toast.error(e.response?.data?.message || 'เกิดข้อผิดพลาด', { id: tid });
@@ -73,7 +92,7 @@ export default function ChannelsPage() {
     setSyncing(true);
     const tid = toast.loading('กำลังดึงรายชื่อผู้ติดตามจาก LINE OA...');
     try {
-      const r = await api.post('/channels/line/sync-followers');
+      const r = await api.post('/channels/line/sync-followers', { companyId: companyId || undefined });
       toast.success(r.data.message || 'ดึงข้อมูลสำเร็จ', { id: tid, duration: 5000 });
     } catch (e: any) {
       toast.error(e.response?.data?.message || 'เกิดข้อผิดพลาดในการดึงข้อมูล', { id: tid });
@@ -88,12 +107,12 @@ export default function ChannelsPage() {
     setTgSaving(true);
     const tid = toast.loading('กำลังเชื่อมต่อ...');
     try {
-      const r = await api.post('/channels/telegram', { botToken: tgToken });
+      const r = await api.post('/channels/telegram', { botToken: tgToken, companyId: companyId || undefined });
       toast.success(r.data.message || 'สำเร็จ', { id: tid });
       setTgBotInfo({ username: r.data.botUsername });
       setChannels(prev => {
         const existing = prev.filter(c => c.channel !== 'telegram');
-        return [...existing, { channel: 'telegram', isActive: true, config: { configured: true } }];
+        return [...existing, { channel: 'telegram', isActive: true, config: { configured: true }, scope: companyId ? 'company' : 'tenant' } as any];
       });
     } catch (e: any) {
       toast.error(e.response?.data?.message || 'เกิดข้อผิดพลาด', { id: tid });
@@ -104,7 +123,7 @@ export default function ChannelsPage() {
   const disconnect = async (ch: string) => {
     if (!confirm(`ต้องการปิดการเชื่อมต่อ ${ch.toUpperCase()} ใช่ไหม?`)) return;
     try {
-      await api.delete(`/channels/${ch}`);
+      await api.delete(`/channels/${ch}`, { params: companyId ? { companyId } : {} });
       setChannels(prev => prev.map(c => c.channel === ch ? { ...c, isActive: false } : c));
       toast.success(`ปิดการเชื่อมต่อ ${ch.toUpperCase()} แล้ว`);
     } catch { toast.error('เกิดข้อผิดพลาด'); }
@@ -120,10 +139,27 @@ export default function ChannelsPage() {
 
   return (
     <div style={{ maxWidth: 800, margin: '0 auto' }}>
-      <div style={{ marginBottom: 24 }}>
+      <div style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: '1.15rem', fontWeight: 700, marginBottom: 4 }}>📡 ตั้งค่าช่องทาง</h2>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>เชื่อมต่อ LINE OA และ Telegram Bot เพื่อรับ-ส่งข้อความอัตโนมัติ</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>เชื่อมต่อ LINE OA และ Telegram Bot เพื่อรับ-ส่งข้อความอัตโนมัติ — แยกตามบริษัทได้</p>
       </div>
+
+      {/* ─── เลือกบริษัท ─── */}
+      <div style={{ ...sectionStyle, padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        <div style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>🏢 ช่องทางของ:</div>
+        <select className="input" style={{ maxWidth: 300 }} value={companyId} onChange={e => switchCompany(e.target.value)}>
+          <option value="">🌐 ช่องทางกลาง (ทุกบริษัท)</option>
+          {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', flex: 1, minWidth: 220 }}>
+          เลือกบริษัทเพื่อใส่ LINE OA / Telegram แยกของบริษัทนั้น — แชทที่เข้ามาทาง Webhook ของบริษัทจะเข้า inbox ภายใต้บริษัทนั้น และใช้ AI Bot ของบริษัทนั้นตอบ
+        </div>
+      </div>
+      {companyId && isConnected('line') && isFallback('line') && (
+        <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 8, padding: '8px 14px', marginBottom: 16, fontSize: '0.78rem', color: 'var(--warning)' }}>
+          ⚠️ บริษัทนี้ยังไม่มี LINE OA ของตัวเอง — กำลังใช้ช่องทางกลางอยู่ ใส่ Secret/Token ด้านล่างเพื่อแยกช่องทางของบริษัทนี้
+        </div>
+      )}
 
       {/* ── LINE OA ─────────────────────────────────────── */}
       <div style={sectionStyle}>

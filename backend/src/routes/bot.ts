@@ -38,12 +38,14 @@ router.get('/', async (req: Request, res: Response) => {
 
 router.put('/', async (req: Request, res: Response) => {
   try {
-    const { systemPrompt, model, temperature, isActive } = req.body;
+    const { systemPrompt, model, temperature, isActive, settings } = req.body;
     const companyId = await resolveCompanyId(req);
     const existing = await prisma.botConfig.findFirst({ where: { companyId } });
+    // settings (การตั้งค่าละเอียด) เก็บใน metadata เป็น JSON
+    const metadata = settings !== undefined ? JSON.stringify(settings || {}) : undefined;
     const bot = existing
-      ? await prisma.botConfig.update({ where: { id: existing.id }, data: { systemPrompt, model, temperature, isActive } })
-      : await prisma.botConfig.create({ data: { tenantId: req.tenantId!, companyId, name: 'AI Bot', systemPrompt, model, temperature, isActive } });
+      ? await prisma.botConfig.update({ where: { id: existing.id }, data: { systemPrompt, model, temperature, isActive, ...(metadata !== undefined ? { metadata } : {}) } })
+      : await prisma.botConfig.create({ data: { tenantId: req.tenantId!, companyId, name: 'AI Bot', systemPrompt, model, temperature, isActive, metadata: metadata || '{}' } });
     return res.json({ success: true, bot });
   } catch { return res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' }); }
 });

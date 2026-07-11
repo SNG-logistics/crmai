@@ -18,6 +18,13 @@ export default function BotPage() {
   const [companyId, setCompanyId] = useState<string>('');
 
   const DEFAULT_FORM = { systemPrompt: '', model: 'gpt-4o', temperature: 0.7, isActive: true };
+  const DEFAULT_SETTINGS = {
+    botName: '', greeting: '', language: 'auto', tone: 'friendly',
+    maxSentences: 3, useEmoji: true, handoffKeywords: '',
+    businessInfo: '', forbidden: '', collectCustomerInfo: true,
+  };
+  const [settings, setSettings] = useState<any>(DEFAULT_SETTINGS);
+  const setS = (k: string, v: any) => setSettings((prev: any) => ({ ...prev, [k]: v }));
 
   // โหลด config ของบริษัทที่เลือก (ไม่ส่ง companyId = บริษัทเริ่มต้น)
   const loadBot = (cid?: string) => {
@@ -26,8 +33,14 @@ export default function BotPage() {
       const b = r.data.bot;
       setBot(b);
       if (!cid && r.data.companyId) setCompanyId(r.data.companyId);
-      if (b) { setForm({ systemPrompt: b.systemPrompt, model: b.model, temperature: b.temperature, isActive: b.isActive }); setKb(b.knowledgeBase || []); }
-      else { setForm(DEFAULT_FORM); setKb([]); }
+      if (b) {
+        setForm({ systemPrompt: b.systemPrompt, model: b.model, temperature: b.temperature, isActive: b.isActive });
+        setKb(b.knowledgeBase || []);
+        let meta: any = {};
+        try { meta = typeof b.metadata === 'string' ? JSON.parse(b.metadata || '{}') : (b.metadata || {}); } catch { meta = {}; }
+        setSettings({ ...DEFAULT_SETTINGS, ...meta });
+      }
+      else { setForm(DEFAULT_FORM); setKb([]); setSettings(DEFAULT_SETTINGS); }
       setLoading(false);
     }).catch(() => setLoading(false));
   };
@@ -50,7 +63,7 @@ export default function BotPage() {
     setSaving(true);
     const tid = toast.loading('กำลังบันทึก...');
     try {
-      const r = await api.put('/bot', { ...form, companyId });
+      const r = await api.put('/bot', { ...form, companyId, settings });
       setBot(r.data.bot);
       toast.success(`บันทึกการตั้งค่า AI ของ ${companyName || 'บริษัท'} สำเร็จ ✅`, { id: tid });
     }
@@ -139,6 +152,72 @@ export default function BotPage() {
           <div className="form-group">
             <label className="label">Temperature: {form.temperature} (0=ตามตำรา, 1=สร้างสรรค์)</label>
             <input type="range" min={0} max={1} step={0.1} value={form.temperature} onChange={e => setForm(f => ({ ...f, temperature: parseFloat(e.target.value) }))} style={{ width: '100%', accentColor: 'var(--teal)' }} />
+          </div>
+
+          {/* ─── การตั้งค่าละเอียด ─── */}
+          <div style={{ borderTop: '1px solid var(--border)', margin: '20px 0', paddingTop: 20 }}>
+            <div style={{ fontWeight: 600, marginBottom: 14 }}>⚙️ การตั้งค่าละเอียด</div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-group">
+                <label className="label">ชื่อบอท (ใช้แนะนำตัว)</label>
+                <input className="input" value={settings.botName} onChange={e => setS('botName', e.target.value)} placeholder="เช่น น้องใบเตย" />
+              </div>
+              <div className="form-group">
+                <label className="label">ภาษาที่ตอบ</label>
+                <select className="input" value={settings.language} onChange={e => setS('language', e.target.value)}>
+                  <option value="auto">อัตโนมัติ (ตามลูกค้า)</option>
+                  <option value="th">ไทยเสมอ</option>
+                  <option value="lo">ลาวเสมอ</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="label">โทนการตอบ</label>
+                <select className="input" value={settings.tone} onChange={e => setS('tone', e.target.value)}>
+                  <option value="friendly">เป็นกันเอง</option>
+                  <option value="formal">สุภาพทางการ</option>
+                  <option value="playful">สนุก เฮฮา</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="label">ความยาวคำตอบสูงสุด (ประโยค)</label>
+                <select className="input" value={settings.maxSentences} onChange={e => setS('maxSentences', parseInt(e.target.value))}>
+                  {[1,2,3,4,5,6].map(n => <option key={n} value={n}>{n} ประโยค</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="label">ข้อความทักทาย (เมื่อลูกค้าทักครั้งแรก)</label>
+              <input className="input" value={settings.greeting} onChange={e => setS('greeting', e.target.value)} placeholder="เช่น สวัสดีค่ะ ยินดีให้บริการนะคะ 😊" />
+            </div>
+
+            <div className="form-group">
+              <label className="label">📋 ข้อมูลธุรกิจ (ข้อเท็จจริงที่ให้บอทใช้ตอบ — โปรโมชั่น เวลาทำการ ขั้นตอนฝาก-ถอน ฯลฯ)</label>
+              <textarea className="input" rows={6} value={settings.businessInfo} onChange={e => setS('businessInfo', e.target.value)}
+                placeholder={'ใส่ข้อมูลจริงของบริษัทนี้ บอทจะตอบตามนี้เท่านั้น ไม่แต่งเอง เช่น' + String.fromCharCode(10) + '- โปรสมาชิกใหม่ ฝาก 100 รับ 150' + String.fromCharCode(10) + '- ฝากขั้นต่ำ 100 บาท ถอนขั้นต่ำ 300 บาท' + String.fromCharCode(10) + '- เวลาทำการแอดมิน 9:00-24:00'} />
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>⚠️ ถ้าเว้นว่าง ระบบจะใช้ข้อมูลโปรโมชั่นกลางเดิม — แนะนำให้กรอกของบริษัทนี้เอง</div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-group">
+                <label className="label">คำที่ต้องโอนให้แอดมินทันที (คั่นด้วย ,)</label>
+                <input className="input" value={settings.handoffKeywords} onChange={e => setS('handoffKeywords', e.target.value)} placeholder="เช่น ร้องเรียน, โกง, ทนาย" />
+              </div>
+              <div className="form-group">
+                <label className="label">สิ่งที่ห้ามบอททำ/ตอบ</label>
+                <input className="input" value={settings.forbidden} onChange={e => setS('forbidden', e.target.value)} placeholder="เช่น ห้ามการันตีผลตอบแทน" />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 8 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
+                <input type="checkbox" checked={settings.useEmoji} onChange={e => setS('useEmoji', e.target.checked)} /> 😊 ใช้อีโมจิ
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
+                <input type="checkbox" checked={settings.collectCustomerInfo} onChange={e => setS('collectCustomerInfo', e.target.checked)} /> 💾 เก็บข้อมูลลูกค้าจากแชทอัตโนมัติ + ไม่ขอซ้ำ + ทวนยืนยันก่อนแก้ปัญหา
+              </label>
+            </div>
           </div>
 
           <button className="btn btn-primary" onClick={saveBot} disabled={saving}>

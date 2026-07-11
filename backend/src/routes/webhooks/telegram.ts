@@ -4,6 +4,8 @@ import { parseTelegramUpdate, sendTelegramMessage } from '../../services/telegra
 import { processBotMessage } from '../../services/ai.service';
 import { emitToTenant } from '../../lib/socket';
 import { defaultCompanyId } from '../../lib/company-scope';
+import { getChannelConfig } from '../../lib/channel-config';
+import { captureCustomerInfo, mightContainCustomerInfo, readProfile, buildProfileContext } from '../../services/contact-memory.service';
 
 const router = Router();
 
@@ -39,15 +41,14 @@ function isFreeCreditQuery(text: string): boolean {
   return thaiKeywords.some(kw => t.includes(kw)) || englishKeywords.some(kw => t.includes(kw));
 }
 
-/** POST /api/webhooks/telegram/:tenantId */
-router.post('/:tenantId', async (req: Request, res: Response) => {
+/** POST /api/webhooks/telegram/:tenantId[/:companyId] */
+async function handleTelegramWebhook(req: Request, res: Response) {
   const { tenantId } = req.params;
+  const companyIdHint = (req.params as any).companyId || null;
   res.status(200).json({ status: 'ok' });
 
   try {
-    const channelConfig = await prisma.channelConfig.findUnique({
-      where: { tenantId_channel: { tenantId, channel: 'telegram' } },
-    });
+    const channelConfig = await getChannelConfig(tenantId, 'telegram', companyIdHint);
     if (!channelConfig || !channelConfig.isActive) {
       console.warn(`Telegram webhook: no active config for tenant ${tenantId}`);
       return;
@@ -92,8 +93,8 @@ router.post('/:tenantId', async (req: Request, res: Response) => {
       where: { tenantId_channel_channelId: { tenantId, channel: 'telegram', channelId: chatId } },
     });
     if (!conversation) {
-      // ผูกบริษัทเริ่มต้นของ tenant — ไม่งั้น conv จะหายไปจาก inbox เมื่อกรองตามบริษัท
-      const companyId = await defaultCompanyId(tenantId);
+      // ผูกบริษัทของช่องทางนี้ — ไม่มีก็ใช้บริษัทเริ่มต้นของ tenant
+      const companyId = companyIdHint || (channelConfig as any).companyId || await defaultCompanyId(tenantId);
       conversation = await prisma.conversation.create({
         data: { tenantId, companyId, contactId: contact.id, channel: 'telegram', channelId: chatId, status: 'bot', isBot: true },
       });
@@ -184,7 +185,21 @@ router.post('/:tenantId', async (req: Request, res: Response) => {
           content: m.content,
         }));
 
-        const { reply, shouldHandoff } = await processBotMessage(tenantId, conversationHistory, normalized.content);
+        // 💾 เก็บข้อมูลลูกค้าอัตโนมัติ + ส่ง context ให้บอท
+        let profileForBot = readProfile(contact as any);
+        if (mightContainCustomerInfo(normalized.content)) {
+          const captured = await captureCustomerInfo({
+            tenantId, contactId: contact.id,
+            recentMessages: [...conversationHistory.slice(-5), { role: 'user', content: normalized.content }],
+          });
+          if (captured) profileForBot = captured;
+        }
+        const { reply, shouldHandoff } = await processBotMessage(
+          tenantId, conversationHistory, normalized.content,
+          { displayName: contact.displayName },
+          conversation.companyId,
+          { profileContext: buildProfileContext(profileForBot) },
+        );
         console.log(`[TG Bot] tenant=${tenantId} reply="${reply.substring(0,60)}" handoff=${shouldHandoff}`);
 
         await sendTelegramMessage(chatId, reply, botToken);
@@ -221,6 +236,8 @@ router.post('/:tenantId', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Telegram webhook error:', err?.message || err);
   }
-});
+}
+router.post('/:tenantId', handleTelegramWebhook);
+router.post('/:tenantId/:companyId', handleTelegramWebhook);
 
 export default router;

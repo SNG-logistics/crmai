@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
+import { getChannelConfig } from '../lib/channel-config';
 import { verifyToken } from '../middleware/auth';
 import { sendLinePush, lineTextMessage, lineFlexMessage } from '../services/line.service';
 import { sendTelegramMessage } from '../services/telegram.service';
@@ -122,7 +123,7 @@ router.post('/:id/run', async (req: Request, res: Response) => {
       for (const contact of contacts) {
         for (const ch of channels) {
           try {
-            const cfg = await prisma.channelConfig.findUnique({ where: { tenantId_channel: { tenantId, channel: ch } } });
+            const cfg = await getChannelConfig(tenantId, ch);
             if (!cfg) continue;
             const config = JSON.parse(cfg.config);
             if (ch === 'line' && contact.lineUserId) {

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
+import { getChannelConfig } from '../lib/channel-config';
 import { verifyToken } from '../middleware/auth';
 import { sendLinePush } from '../services/line.service';
 import {
@@ -235,7 +236,7 @@ router.post('/test-send', async (req: Request, res: Response) => {
     });
     if (!camps.length) return res.status(400).json({ success: false, message: 'ยังไม่มีค่ายเกม — กด "เพิ่มค่ายตัวอย่าง" ก่อนนะคะ' });
 
-    const ch = await prisma.channelConfig.findUnique({ where: { tenantId_channel: { tenantId: req.tenantId!, channel: 'line' } } });
+    const ch = await getChannelConfig(req.tenantId!, 'line', (req.query.companyId as string) || (req.body?.companyId as string) || null);
     if (!ch) return res.status(400).json({ success: false, message: 'ยังไม่ได้ตั้งค่า LINE OA' });
     let cfg: any = ch.config; if (typeof cfg === 'string') { try { cfg = JSON.parse(cfg); } catch { cfg = {}; } }
 

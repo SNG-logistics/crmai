@@ -16,11 +16,16 @@ const EXPLICIT_HANDOFF_PHRASES = [
   'โอนให้คนดูแล', 'ขอพูดกับคน',
 ];
 
-function checkHandoff(userMessage: string, aiReply: string): boolean {
+function checkHandoff(userMessage: string, aiReply: string, extraKeywords?: string): boolean {
   const msg   = userMessage.toLowerCase();
   const reply = aiReply.toLowerCase();
   if (reply.includes('handoff_requested')) return true;
-  return EXPLICIT_HANDOFF_PHRASES.some(phrase => msg.includes(phrase));
+  if (EXPLICIT_HANDOFF_PHRASES.some(phrase => msg.includes(phrase))) return true;
+  if (extraKeywords) {
+    const kws = extraKeywords.split(',').map(k => k.trim().toLowerCase()).filter(k => k.length > 1);
+    if (kws.some(k => msg.includes(k))) return true;
+  }
+  return false;
 }
 
 // ─── Smart KB Matching — keyword overlap scoring ─────────────────────────────
@@ -67,6 +72,61 @@ const SYSTEM_BASE = `กฎสำคัญ:
 ${PROMOTION_INFO}`;
 const MAX_HISTORY = 6;
 
+// ─── Bot Settings (เก็บใน BotConfig.metadata เป็น JSON) ───────────────────────
+export type BotSettings = {
+  botName?: string;          // ชื่อที่บอทใช้แทนตัวเอง
+  greeting?: string;         // ข้อความทักทาย/แนวการเปิดบทสนทนา
+  language?: 'th' | 'lo' | 'auto'; // ภาษาหลักในการตอบ
+  tone?: 'formal' | 'friendly' | 'playful'; // โทนการตอบ
+  maxSentences?: number;     // ความยาวคำตอบสูงสุด (ประโยค)
+  useEmoji?: boolean;        // ใช้อีโมจิ
+  handoffKeywords?: string;  // คำที่ต้องโอนให้แอดมิน (คั่นด้วย ,)
+  businessInfo?: string;     // ข้อมูลจริงของธุรกิจ (โปรโมชั่น เวลาทำการ ช่องทางฝากถอน ฯลฯ)
+  forbidden?: string;        // สิ่งที่ห้ามบอทตอบ/ทำ
+  collectCustomerInfo?: boolean; // เก็บข้อมูลลูกค้าอัตโนมัติ
+};
+
+export function parseBotSettings(metadata: any): BotSettings {
+  let m: any = metadata;
+  if (typeof m === 'string') { try { m = JSON.parse(m); } catch { m = {}; } }
+  if (!m || typeof m !== 'object') m = {};
+  return {
+    botName: m.botName || '',
+    greeting: m.greeting || '',
+    language: m.language || 'auto',
+    tone: m.tone || 'friendly',
+    maxSentences: Number(m.maxSentences) || 3,
+    useEmoji: m.useEmoji !== false,
+    handoffKeywords: m.handoffKeywords || '',
+    businessInfo: m.businessInfo || '',
+    forbidden: m.forbidden || '',
+    collectCustomerInfo: m.collectCustomerInfo !== false,
+  };
+}
+
+// สร้างกฎ system prompt จากการตั้งค่า (แทน SYSTEM_BASE แบบตายตัว)
+function buildSystemRules(s: BotSettings): string {
+  const langRule = s.language === 'th' ? 'ตอบภาษาไทยเสมอ'
+    : s.language === 'lo' ? 'ตอบภาษาลาวเสมอ'
+    : 'ตอบภาษาเดียวกับที่ลูกค้าใช้ (หลักๆ คือไทย)';
+  const toneRule = s.tone === 'formal' ? 'สุภาพ เป็นทางการ'
+    : s.tone === 'playful' ? 'สนุก เป็นกันเองมาก'
+    : 'เป็นกันเอง อบอุ่น สุภาพ';
+  const rules: string[] = [
+    `- ${langRule} ไม่เกิน ${s.maxSentences || 3} ประโยคสั้นๆ โทน${toneRule}`,
+    s.useEmoji ? '- ใส่อีโมจิได้เล็กน้อย (1-2 ตัว)' : '- ห้ามใช้อีโมจิ',
+    s.botName ? `- ถ้าลูกค้าถามชื่อ ให้บอกว่าชื่อ "${s.botName}"` : '',
+    s.greeting ? `- เมื่อลูกค้าทักทายครั้งแรก ให้ทักตามแนวนี้: "${s.greeting}"` : '',
+    '- ⚠️ ตอบตามความจริงเท่านั้น: ใช้ข้อมูลจาก "ข้อมูลธุรกิจ", "FAQ" และ "ข้อมูลลูกค้า" ที่ให้มา ห้ามเดา ห้ามแต่งตัวเลข/โปรโมชั่น/ขั้นตอนขึ้นเอง',
+    '- ถ้าไม่มีข้อมูลหรือไม่แน่ใจ ให้ตอบตรงๆ ว่าขอตรวจสอบกับทีมงานก่อน แล้วพิมพ์ HANDOFF_REQUESTED ต่อท้าย',
+    '- ข้อมูลภายใน (ยอดฝาก สถิติ) ห้ามบอกลูกค้าโดยตรง',
+    '- ⚠️ ห้ามบอกลูกค้าว่า "ยังไม่ได้ฝาก" หรือพูดถึงตัวเลขยอดเงินของลูกค้า',
+    '- ⚠️ ห้ามขอสลิปหรือหลักฐานการโอนซ้ำ',
+    s.forbidden ? `- ข้อห้ามเพิ่มเติมจากร้าน: ${s.forbidden}` : '',
+  ].filter(Boolean);
+  return `กฎสำคัญ:\n${rules.join('\n')}`;
+}
+
 // ─── Core: Generate AI response ───────────────────────────────────────────────
 export async function generateAIResponse(
   messages: { role: 'user' | 'assistant' | 'system'; content: string }[],
@@ -93,7 +153,7 @@ export async function processBotMessage(
     depositCount?: number;
   },
   companyId?: string | null,
-  opts?: { bonusTimeActive?: boolean }
+  opts?: { bonusTimeActive?: boolean; profileContext?: string }
 ): Promise<{ reply: string; shouldHandoff: boolean }> {
 
   // per-company AI: ถ้ามี companyId → โหลด config ของบริษัทนั้น ; ไม่มี → fallback ระดับ tenant
@@ -130,7 +190,22 @@ export async function processBotMessage(
 ให้ตอบกลับด้วยข้อความว่า [[BONUSTIME]] เพียงอย่างเดียวเท่านั้น ห้ามพิมพ์ข้อความอื่นปนมา (ระบบจะแสดงการ์ดค่ายเกมให้เอง)`
     : '';
 
-  const systemPrompt = `${basePrompt}${kbContext}${contactInfo}\n\n${SYSTEM_BASE}${bonusTimeInstr}`;
+  // ─ การตั้งค่าละเอียดของบอท (จากหน้า AI Bot) ─
+  const settings = parseBotSettings(botConfig?.metadata);
+  const rules = buildSystemRules(settings);
+
+  // ─ ข้อมูลธุรกิจ: ถ้าตั้งค่าเองใช้ของบริษัท ; ไม่ตั้ง → ใช้ข้อมูลกลางเดิม ─
+  const businessContext = settings.businessInfo
+    ? `\n\n—— ข้อมูลธุรกิจ (ข้อเท็จจริง ใช้ตอบลูกค้า ห้ามแต่งเพิ่ม) ——\n${settings.businessInfo}`
+    : `\n${PROMOTION_INFO}`;
+
+  // ─ ข้อมูลลูกค้าที่บันทึกไว้ + กฎห้ามขอซ้ำ/ทวนยืนยัน ─
+  const profileContext = opts?.profileContext || '';
+  const registrationRule = profileContext
+    ? `\n- เรื่องสมัครสมาชิก/ขอข้อมูล: ขอเฉพาะข้อมูลที่ยังขาดจากรายการ (ชื่อ-นามสกุล, เบอร์โทร, ธนาคาร, เลขบัญชี) เท่านั้น ห้ามขอทั้งชุดซ้ำ`
+    : `\n- เรื่องสมัครสมาชิก/register/เปิดบัญชี: ให้ตอบข้อความนี้: "🖌รบกวนลูกค้าแจ้งข้อมูลดังนี้นะคะ🖌\n✅ชื่อ - นามสกุล :\n✅เบอร์โทรศัพท์ที่ใช้สมัครสมาชิก :\n✅ธนาคาร :\n✅เลขบัญชีธนาคาร :\n\nรบกวนคุณลูกค้าพิมพ์ข้อมูลเป็นตัวอักษรให้กับทางทีมงานนะคะ"`;
+
+  const systemPrompt = `${basePrompt}${kbContext}${contactInfo}${profileContext}\n\n${rules}${registrationRule}${businessContext}${bonusTimeInstr}`;
 
   const msgs: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
     { role: 'system', content: systemPrompt },
@@ -147,8 +222,9 @@ export async function processBotMessage(
     );
 
     const cleanReply = raw
-      .replace(/HANDOFF_REQUESTED/gi, 'กรุณารอสักครู่นะคะ กำลังโอนให้เจ้าหน้าที่ดูแล 🙏');
-    const shouldHandoff = checkHandoff(userMessage, raw);
+      .replace(/HANDOFF_REQUESTED/gi, '')
+      .trim() || 'กรุณารอสักครู่นะคะ กำลังโอนให้เจ้าหน้าที่ดูแลค่ะ 🙏';
+    const shouldHandoff = checkHandoff(userMessage, raw, settings.handoffKeywords);
 
     return { reply: cleanReply || 'ได้รับข้อความแล้วนะคะ 🙏', shouldHandoff };
   } catch {

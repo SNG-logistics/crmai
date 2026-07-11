@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
+import { getChannelConfig } from '../lib/channel-config';
 import { verifyToken } from '../middleware/auth';
 import { sendLinePush } from '../services/line.service';
 import { emitToTenant } from '../lib/socket';
@@ -67,9 +68,7 @@ router.post('/send', async (req: Request, res: Response) => {
     if (!conv) return res.status(404).json({ success: false, message: 'ไม่พบบทสนทนา' });
     if (conv.channel !== 'line') return res.status(400).json({ success: false, message: 'รองรับเฉพาะ LINE เท่านั้น' });
 
-    const ch = await prisma.channelConfig.findUnique({
-      where: { tenantId_channel: { tenantId: req.tenantId!, channel: 'line' } },
-    });
+    const ch = await getChannelConfig(req.tenantId!, 'line', (req.body?.companyId as string) || null);
     if (!ch) return res.status(400).json({ success: false, message: 'ยังไม่ได้ตั้งค่า LINE' });
 
     const cfg = parseCfg(ch.config);
@@ -150,9 +149,7 @@ router.post('/send-by-line-user-id', async (req: Request, res: Response) => {
     }
 
     // 3. ดึง LINE Config เพื่อรับ accessToken
-    const ch = await prisma.channelConfig.findUnique({
-      where: { tenantId_channel: { tenantId: req.tenantId!, channel: 'line' } },
-    });
+    const ch = await getChannelConfig(req.tenantId!, 'line', (req.body?.companyId as string) || null);
     if (!ch) return res.status(400).json({ success: false, message: 'ยังไม่ได้ตั้งค่า LINE สำหรับร้านค้า' });
 
     const cfg = parseCfg(ch.config);
@@ -204,9 +201,7 @@ router.post('/broadcast', async (req: Request, res: Response) => {
     const { altText, flexJson, contactIds } = req.body;
     if (!flexJson || !contactIds?.length) return res.status(400).json({ success: false, message: 'ต้องระบุ flexJson และ contactIds' });
 
-    const ch = await prisma.channelConfig.findUnique({
-      where: { tenantId_channel: { tenantId: req.tenantId!, channel: 'line' } },
-    });
+    const ch = await getChannelConfig(req.tenantId!, 'line', (req.body?.companyId as string) || null);
     if (!ch) return res.status(400).json({ success: false, message: 'ยังไม่ได้ตั้งค่า LINE' });
     const cfg = parseCfg(ch.config);
     const flexContent = typeof flexJson === 'string' ? JSON.parse(flexJson) : flexJson;
