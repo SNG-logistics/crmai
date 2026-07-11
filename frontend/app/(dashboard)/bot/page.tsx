@@ -13,29 +13,60 @@ export default function BotPage() {
   const [testMsg, setTestMsg] = useState('');
   const [testHistory, setTestHistory] = useState<any[]>([]);
   const [testing, setTesting] = useState(false);
+  // ─── ตั้งค่า AI แยกตามบริษัท (ใช้กับ LINE/แชททุกช่องทางของบริษัทนั้น) ─────────
+  const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
+  const [companyId, setCompanyId] = useState<string>('');
 
-  useEffect(() => {
-    api.get('/bot').then(r => {
+  const DEFAULT_FORM = { systemPrompt: '', model: 'gpt-4o', temperature: 0.7, isActive: true };
+
+  // โหลด config ของบริษัทที่เลือก (ไม่ส่ง companyId = บริษัทเริ่มต้น)
+  const loadBot = (cid?: string) => {
+    setLoading(true);
+    api.get('/bot', { params: cid ? { companyId: cid } : {} }).then(r => {
       const b = r.data.bot;
       setBot(b);
+      if (!cid && r.data.companyId) setCompanyId(r.data.companyId);
       if (b) { setForm({ systemPrompt: b.systemPrompt, model: b.model, temperature: b.temperature, isActive: b.isActive }); setKb(b.knowledgeBase || []); }
+      else { setForm(DEFAULT_FORM); setKb([]); }
       setLoading(false);
     }).catch(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    api.get('/companies').then(r => setCompanies(r.data.companies || [])).catch(() => {});
+    loadBot();
   }, []);
+
+  // เปลี่ยนบริษัท → โหลด config ของบริษัทนั้น + ล้างแชททดสอบ
+  const switchCompany = (cid: string) => {
+    setCompanyId(cid);
+    setTestHistory([]);
+    loadBot(cid);
+  };
+
+  const companyName = companies.find(c => c.id === companyId)?.name || '';
 
   const saveBot = async () => {
     setSaving(true);
     const tid = toast.loading('กำลังบันทึก...');
-    try { const r = await api.put('/bot', form); setBot(r.data.bot); toast.success('บันทึกสำเร็จ ✅', { id: tid }); }
+    try {
+      const r = await api.put('/bot', { ...form, companyId });
+      setBot(r.data.bot);
+      toast.success(`บันทึกการตั้งค่า AI ของ ${companyName || 'บริษัท'} สำเร็จ ✅`, { id: tid });
+    }
     catch { toast.error('บันทึกไม่สำเร็จ', { id: tid }); }
     finally { setSaving(false); }
   };
 
   const addKb = async () => {
     if (!newKb.question || !newKb.answer) return;
-    const r = await api.post('/bot/knowledge', newKb);
-    setKb(prev => [r.data.item, ...prev]);
-    setNewKb({ question: '', answer: '', category: 'general' });
+    try {
+      const r = await api.post('/bot/knowledge', { ...newKb, companyId });
+      setKb(prev => [r.data.item, ...prev]);
+      setNewKb({ question: '', answer: '', category: 'general' });
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || 'เพิ่มไม่สำเร็จ — บันทึกการตั้งค่า Bot ก่อน');
+    }
   };
 
   const deleteKb = async (id: string) => {
@@ -50,28 +81,48 @@ export default function BotPage() {
     setTestHistory(prev => [...prev, userMsg]);
     setTestMsg('');
     try {
-      const r = await api.post('/bot/test', { message: userMsg.content, history: testHistory });
+      const r = await api.post('/bot/test', { message: userMsg.content, history: testHistory, companyId });
       setTestHistory(prev => [...prev, { role: 'assistant', content: r.data.reply }]);
     } finally { setTesting(false); }
   };
 
   const MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'claude-sonnet-4-6', 'claude-opus-4-7', 'gemini-3-5-flash'];
 
-  if (loading) return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300 }}><div className="spinner" /></div>;
-
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 20 }}>
+    <div>
+      {/* ─── Company Selector — ตั้งค่า AI แยกตามบริษัท ─── */}
+      <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: '14px 20px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        <div style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>🏢 ตั้งค่า AI ของบริษัท:</div>
+        <select className="input" style={{ maxWidth: 320 }} value={companyId} onChange={e => switchCompany(e.target.value)}>
+          {companies.length === 0 && <option value="">(บริษัทเริ่มต้น)</option>}
+          {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+          แต่ละบริษัทมี System Prompt / Model / Knowledge Base แยกกัน — Bot จะใช้ config ของบริษัทที่ลูกค้าแชทเข้ามา (LINE/WhatsApp/Telegram)
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 300 }}><div className="spinner" /></div>
+      ) : (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 380px', gap: 20 }}>
       {/* Left: Configuration */}
       <div>
         {/* Bot Settings */}
         <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: 24, marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>🤖 ตั้งค่า AI Bot</h3>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>🤖 ตั้งค่า AI Bot {companyName ? `— ${companyName}` : ''}</h3>
             <label className="toggle">
               <input type="checkbox" checked={form.isActive} onChange={e => setForm(f => ({ ...f, isActive: e.target.checked }))} />
               <span className="toggle-slider" />
             </label>
           </div>
+
+          {!bot && (
+            <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 8, padding: '8px 12px', marginBottom: 16, fontSize: '0.8rem', color: 'var(--warning)' }}>
+              ⚠️ บริษัทนี้ยังไม่มีการตั้งค่า AI — กรอกแล้วกดบันทึกเพื่อสร้าง config ใหม่
+            </div>
+          )}
 
           <div className="form-group">
             <label className="label">AI Model (ผ่าน CometAPI)</label>
@@ -97,7 +148,7 @@ export default function BotPage() {
 
         {/* Knowledge Base */}
         <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: 24 }}>
-          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 20 }}>📚 Knowledge Base (Q&A)</h3>
+          <h3 style={{ fontSize: '1rem', fontWeight: 600, marginBottom: 20 }}>📚 Knowledge Base (Q&A) {companyName ? `— ${companyName}` : ''}</h3>
 
           <div style={{ background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', padding: 16, marginBottom: 16 }}>
             <div className="form-row">
@@ -135,7 +186,7 @@ export default function BotPage() {
 
       {/* Right: Test Chat */}
       <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', height: 'fit-content', maxHeight: 'calc(100vh - 120px)', position: 'sticky', top: 0 }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>🧪 ทดสอบ Bot</div>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>🧪 ทดสอบ Bot {companyName ? `(${companyName})` : ''}</div>
         <div style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 300, maxHeight: 400 }}>
           {testHistory.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-muted)', marginTop: 40 }}>ส่งข้อความเพื่อทดสอบ Bot</div>}
           {testHistory.map((m: any, i: number) => (
@@ -152,6 +203,8 @@ export default function BotPage() {
           <button className="btn btn-primary btn-sm" onClick={testBot} disabled={testing || !testMsg.trim()}>ส่ง</button>
         </div>
       </div>
+      </div>
+      )}
     </div>
   );
 }
