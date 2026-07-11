@@ -26,12 +26,53 @@ export function readProfile(contact: { customFields?: string | null; phone?: str
   return p;
 }
 
-// ข้อความนี้น่าจะมีข้อมูลส่วนตัวไหม — heuristic กันไม่ให้เรียก AI ทุกข้อความ
+// ─── Intent: ลูกค้าต้องการสมัครสมาชิก ─────────────────────────────────────────
+export function isRegisterIntent(text: string): boolean {
+  return /สมัคร|regis|register|sign\s?up|เปิดยูส|เปิดบัญชี|เปิดid|ສະໝັກ|สมัก/i.test(text || '');
+}
+
+// รายการฟิลด์ที่ต้องใช้สมัคร
+export const REGISTER_FIELDS: { key: keyof CrmProfile; label: string }[] = [
+  { key: 'fullName',    label: 'ชื่อ - นามสกุล' },
+  { key: 'phone',       label: 'เบอร์โทรศัพท์ที่ใช้สมัครสมาชิก' },
+  { key: 'bankName',    label: 'ธนาคาร' },
+  { key: 'bankAccount', label: 'เลขบัญชีธนาคาร' },
+];
+
+export function missingRegisterFields(p: CrmProfile): { key: keyof CrmProfile; label: string }[] {
+  return REGISTER_FIELDS.filter(f => !p[f.key]);
+}
+
+// สร้างข้อความขอข้อมูลสมัคร — ขอเฉพาะที่ยังขาด / ถ้าครบแล้วให้ทวนยืนยัน
+export function buildRegisterReply(p: CrmProfile): string {
+  const missing = missingRegisterFields(p);
+  if (missing.length === REGISTER_FIELDS.length) {
+    // ยังไม่มีข้อมูลเลย → ขอทั้งชุด (ฟอร์มมาตรฐาน)
+    return `🖌รบกวนลูกค้าแจ้งข้อมูลดังนี้นะคะ🖌\n✅ชื่อ - นามสกุล :\n✅เบอร์โทรศัพท์ที่ใช้สมัครสมาชิก :\n✅ธนาคาร :\n✅เลขบัญชีธนาคาร :\n\nรบกวนคุณลูกค้าพิมพ์ข้อมูลเป็นตัวอักษรให้กับทางทีมงานนะคะ`;
+  }
+  if (missing.length > 0) {
+    // มีบางส่วนแล้ว → โชว์ที่มี + ขอเฉพาะที่ขาด
+    const have = REGISTER_FIELDS.filter(f => p[f.key]).map(f => `✅${f.label} : ${p[f.key]}`).join('\n');
+    const need = missing.map(f => `✅${f.label} :`).join('\n');
+    return `ข้อมูลที่ได้รับแล้วค่ะ🖌\n${have}\n\nรบกวนขอเพิ่มอีกนิดนะคะ🙏\n${need}`;
+  }
+  // ครบแล้ว → ทวนยืนยัน ไม่ขอซ้ำ
+  const all = REGISTER_FIELDS.map(f => `✅${f.label} : ${p[f.key]}`).join('\n');
+  return `ลูกค้าเคยแจ้งข้อมูลไว้ครบแล้วนะคะ🥰\n${all}\n\nรบกวนยืนยันว่าข้อมูลถูกต้องไหมคะ ถ้ามีจุดไหนไม่ถูกแจ้งแก้ได้เลยค่ะ`;
+}
+
+// ข้อความนี้น่าจะมี "ข้อมูลจริง" ของลูกค้าไหม — เข้มงวด: ต้องมีตัวเลขยาว (เบอร์/บัญชี)
+// หรือมีคีย์เวิร์ดฟิลด์+เนื้อหา (เช่น "ชื่อ สมชาย ใจดี") — คำถามเฉยๆ เช่น "สมัครยังไง" จะไม่จับ
 export function mightContainCustomerInfo(text: string): boolean {
   if (!text) return false;
-  const digits = (text.match(/\d/g) || []).length;
-  if (digits >= 6) return true; // เบอร์โทร/เลขบัญชี
-  return /ชื่อ|สกุล|นามสกุล|เบอร์|โทร|ธนาคาร|บัญชี|ยูส|user|กสิกร|ไทยพาณิชย์|กรุงไทย|กรุงเทพ|กรุงศรี|ออมสิน|ทหารไทย|ttb|scb|kbank|ktb|bbl|bay|ຊື່|ນາມສະກຸນ|ເບີ|ທະນາຄານ|ບັນຊີ/i.test(text);
+  const digitRuns = text.match(/\d[\d\s-]{7,}/g); // ตัวเลขต่อเนื่อง ≥8 หลัก (เบอร์/เลขบัญชี)
+  if (digitRuns) return true;
+  // คีย์เวิร์ดฟิลด์ + มีเนื้อหาตามหลัง (มี : หรือช่องว่างตามด้วยตัวอักษร ≥2 คำ)
+  const kw = /(ชื่อ|สกุล|นามสกุล|ธนาคาร|บัญชี|ยูสเซอร์|ยูส|กสิกร|ไทยพาณิชย์|กรุงไทย|กรุงเทพ|กรุงศรี|ออมสิน|ttb|scb|kbank|ktb|bbl|bay|ຊື່|ນາມສະກຸນ|ທະນາຄານ|ບັນຊີ)/i;
+  if (!kw.test(text)) return false;
+  // ต้องดูเหมือน "ให้ข้อมูล" ไม่ใช่ "ถามคำถาม"
+  if (/ยังไง|อย่างไร|ไหม|มั้ย|\?|ได้บ่|แນວໃດ/i.test(text) && !text.includes(':')) return false;
+  return true;
 }
 
 // ─── สกัดข้อมูลจากบทสนทนาล่าสุดด้วย AI แล้วบันทึก ────────────────────────────

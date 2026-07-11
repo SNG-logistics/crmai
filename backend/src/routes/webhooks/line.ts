@@ -7,7 +7,7 @@ import { emitToTenant } from '../../lib/socket';
 import { verifySlip } from '../../services/slip-verify.service';
 import { defaultCompanyId } from '../../lib/company-scope';
 import { getChannelConfig } from '../../lib/channel-config';
-import { captureCustomerInfo, mightContainCustomerInfo, readProfile, buildProfileContext } from '../../services/contact-memory.service';
+import { captureCustomerInfo, mightContainCustomerInfo, readProfile, buildProfileContext, isRegisterIntent, buildRegisterReply, missingRegisterFields } from '../../services/contact-memory.service';
 import {
   buildBonusTimeMenuMessages, buildBonusTimeGamesMessages,
   matchBonusTimeKeyword, parseBonusPostback,
@@ -971,17 +971,39 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     }
     const profileContext = buildProfileContext(profileForBot);
 
-    const { reply, shouldHandoff } = await processBotMessage(
-      tenantId, conversationHistory, normalized.content,
-      {
-        displayName: contact.displayName,
-        memberType: (contact as any).memberType,
-        totalDeposit: (contact as any).totalDeposit,
-        depositCount: (contact as any).depositCount,
-      },
-      conversation.companyId,
-      { bonusTimeActive: !!btConfig, profileContext },
-    );
+    // ═══ เรื่องสมัครสมาชิก — logic ตายตัว ไม่พึ่ง AI ═══
+    //  ยังไม่มีข้อมูล → ส่งฟอร์ม ✅ ทั้งชุด | มีบางส่วน → ขอเฉพาะที่ขาด | ครบ → ทวนยืนยัน
+    // บอทเพิ่งขอข้อมูลสมัครไปหรือเปล่า (ดูจากข้อความล่าสุดของฝั่งเรา)
+    const lastBotMsg = [...conversationHistory].reverse().find(m => m.role === 'assistant')?.content || '';
+    const inRegisterFlow = /✅|รบกวนลูกค้าแจ้งข้อมูล|ขอเพิ่มอีกนิด|ยืนยันว่าข้อมูลถูกต้อง/.test(lastBotMsg);
+
+    let reply: string;
+    let shouldHandoff = false;
+    if (isRegisterIntent(normalized.content) && !mightContainCustomerInfo(normalized.content)) {
+      // ลูกค้า "ถามเรื่องสมัคร" (ยังไม่ได้ให้ข้อมูล) → ส่งฟอร์ม/ขอเฉพาะที่ขาด แบบตายตัว
+      reply = buildRegisterReply(profileForBot);
+      console.log(`[LINE Bot] 📝 register-intent fast path conv=${conversation.id}`);
+    } else if (inRegisterFlow && mightContainCustomerInfo(normalized.content)) {
+      // ลูกค้ากำลังส่งข้อมูลสมัครตามที่ขอ → บันทึกแล้วตอบตามข้อมูลจริง (ขาดอะไรขอต่อ / ครบแล้วทวนยืนยัน)
+      reply = buildRegisterReply(profileForBot);
+      // ครบทุกช่องแล้ว → โอนให้แอดมินดำเนินการสมัครต่อ
+      shouldHandoff = missingRegisterFields(profileForBot).length === 0;
+      console.log(`[LINE Bot] 📝 register-info received conv=${conversation.id} handoff=${shouldHandoff}`);
+    } else {
+      const r = await processBotMessage(
+        tenantId, conversationHistory, normalized.content,
+        {
+          displayName: contact.displayName,
+          memberType: (contact as any).memberType,
+          totalDeposit: (contact as any).totalDeposit,
+          depositCount: (contact as any).depositCount,
+        },
+        conversation.companyId,
+        { bonusTimeActive: !!btConfig, profileContext },
+      );
+      reply = r.reply;
+      shouldHandoff = r.shouldHandoff;
+    }
 
     // ⚡ AI ตัดสินใจเรียก BONUS TIME เอง (ตอบด้วยโทเคน [[BONUSTIME]])
     if (btConfig && /\[\[BONUSTIME\]\]/i.test(reply)) {

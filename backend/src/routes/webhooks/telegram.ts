@@ -5,7 +5,7 @@ import { processBotMessage } from '../../services/ai.service';
 import { emitToTenant } from '../../lib/socket';
 import { defaultCompanyId } from '../../lib/company-scope';
 import { getChannelConfig } from '../../lib/channel-config';
-import { captureCustomerInfo, mightContainCustomerInfo, readProfile, buildProfileContext } from '../../services/contact-memory.service';
+import { captureCustomerInfo, mightContainCustomerInfo, readProfile, buildProfileContext, isRegisterIntent, buildRegisterReply } from '../../services/contact-memory.service';
 
 const router = Router();
 
@@ -194,12 +194,18 @@ async function handleTelegramWebhook(req: Request, res: Response) {
           });
           if (captured) profileForBot = captured;
         }
-        const { reply, shouldHandoff } = await processBotMessage(
-          tenantId, conversationHistory, normalized.content,
-          { displayName: contact.displayName },
-          conversation.companyId,
-          { profileContext: buildProfileContext(profileForBot) },
-        );
+        let reply: string; let shouldHandoff = false;
+        if (isRegisterIntent(normalized.content) && !mightContainCustomerInfo(normalized.content)) {
+          reply = buildRegisterReply(profileForBot);
+        } else {
+          const r = await processBotMessage(
+            tenantId, conversationHistory, normalized.content,
+            { displayName: contact.displayName },
+            conversation.companyId,
+            { profileContext: buildProfileContext(profileForBot) },
+          );
+          reply = r.reply; shouldHandoff = r.shouldHandoff;
+        }
         console.log(`[TG Bot] tenant=${tenantId} reply="${reply.substring(0,60)}" handoff=${shouldHandoff}`);
 
         await sendTelegramMessage(chatId, reply, botToken);

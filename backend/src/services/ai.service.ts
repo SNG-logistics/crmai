@@ -227,7 +227,8 @@ export async function processBotMessage(
     const shouldHandoff = checkHandoff(userMessage, raw, settings.handoffKeywords);
 
     return { reply: cleanReply || 'ได้รับข้อความแล้วนะคะ 🙏', shouldHandoff };
-  } catch {
+  } catch (e: any) {
+    console.error('[AI] ❌ processBotMessage failed:', e?.response?.status, e?.response?.data?.error?.message || e?.response?.data?.message || e?.message);
     return {
       reply: 'ได้รับข้อความแล้วนะคะ 🙏 ทีมงานจะรีบตอบกลับโดยเร็วที่สุดค่ะ',
       shouldHandoff: true,

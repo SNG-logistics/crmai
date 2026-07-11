@@ -1058,7 +1058,14 @@ export default function InboxPage() {
                     onChange={e => handleTyping(e.target.value)}
                     disabled={activeConv.isBot}
                     onKeyDown={e => {
-                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        // ถ้า popup key ลัดเปิดอยู่ → Enter = เลือกตัวแรก (ไม่ส่ง "/xxx" ดิบๆ หาลูกค้า)
+                        if (showCanned && filteredQuickReplies.length > 0) { applyQuickReply(filteredQuickReplies[0]); return; }
+                        if (showCanned && filteredCanned.length > 0) { setNewMsg(filteredCanned[0].text); setShowCanned(false); return; }
+                        if (newMsg.trim().startsWith('/') && quickReplies.length > 0) { toast.error('ไม่พบ key ลัดนี้ — กด Esc ถ้าต้องการส่งข้อความปกติ'); return; }
+                        sendMessage();
+                      }
                       if (e.key === 'Escape') { setShowCanned(false); setAiSuggest(''); setEnchant(null); }
                     }}
                     style={{ resize: 'none', borderRadius: 10, paddingRight: 40, minHeight: 60 }}
@@ -1068,6 +1075,11 @@ export default function InboxPage() {
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <button className="btn btn-ghost btn-sm btn-icon" disabled={activeConv.isBot}
+                    title="⚡ Key ลัด — AI แต่งคำตอบจากที่ตั้งไว้"
+                    onClick={() => { setCannedFilter('/'); setShowCanned(v => !v); textareaRef.current?.focus(); }}>
+                    ⚡
+                  </button>
                   <button className="btn btn-ghost btn-sm btn-icon" onClick={getAISuggestion} disabled={loadingAI || activeConv.isBot} title="AI แนะนำ">
                     {loadingAI ? <span className="spinner" style={{ width: 14, height: 14 }} /> : '✨'}
                   </button>
