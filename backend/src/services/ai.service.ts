@@ -17,14 +17,6 @@ const EXPLICIT_HANDOFF_PHRASES = [
 ];
 
 function checkHandoff(userMessage: string, aiReply: string, extraKeywords?: string): boolean {
-  const msg   = userMessage.toLowerCase();
-  const reply = aiReply.toLowerCase();
-  if (reply.includes('handoff_requested')) return true;
-  if (EXPLICIT_HANDOFF_PHRASES.some(phrase => msg.includes(phrase))) return true;
-  if (extraKeywords) {
-    const kws = extraKeywords.split(',').map(k => k.trim().toLowerCase()).filter(k => k.length > 1);
-    if (kws.some(k => msg.includes(k))) return true;
-  }
   return false;
 }
 
@@ -118,7 +110,7 @@ function buildSystemRules(s: BotSettings): string {
     s.botName ? `- ถ้าลูกค้าถามชื่อ ให้บอกว่าชื่อ "${s.botName}"` : '',
     s.greeting ? `- เมื่อลูกค้าทักทายครั้งแรก ให้ทักตามแนวนี้: "${s.greeting}"` : '',
     '- ⚠️ ตอบตามความจริงเท่านั้น: ใช้ข้อมูลจาก "ข้อมูลธุรกิจ", "FAQ" และ "ข้อมูลลูกค้า" ที่ให้มา ห้ามเดา ห้ามแต่งตัวเลข/โปรโมชั่น/ขั้นตอนขึ้นเอง',
-    '- ถ้าไม่มีข้อมูลหรือไม่แน่ใจ ให้ตอบตรงๆ ว่าขอตรวจสอบกับทีมงานก่อน แล้วพิมพ์ HANDOFF_REQUESTED ต่อท้าย',
+    '- ตอบลูกค้าให้ได้ทุกคำถามด้วยตัวเอง ห้ามบอกให้รอแอดมิน/เจ้าหน้าที่ และห้ามพิมพ์ HANDOFF_REQUESTED — ถ้าไม่มีข้อมูลให้ตอบเท่าที่รู้อย่างสุภาพ',
     '- ข้อมูลภายใน (ยอดฝาก สถิติ) ห้ามบอกลูกค้าโดยตรง',
     '- ⚠️ ห้ามบอกลูกค้าว่า "ยังไม่ได้ฝาก" หรือพูดถึงตัวเลขยอดเงินของลูกค้า',
     '- ⚠️ ห้ามขอสลิปหรือหลักฐานการโอนซ้ำ',
@@ -223,15 +215,15 @@ export async function processBotMessage(
 
     const cleanReply = raw
       .replace(/HANDOFF_REQUESTED/gi, '')
-      .trim() || 'กรุณารอสักครู่นะคะ กำลังโอนให้เจ้าหน้าที่ดูแลค่ะ 🙏';
+      .trim() || 'ได้รับข้อความแล้วนะคะ สอบถามเพิ่มเติมได้เลยค่ะ 🙏';
     const shouldHandoff = checkHandoff(userMessage, raw, settings.handoffKeywords);
 
     return { reply: cleanReply || 'ได้รับข้อความแล้วนะคะ 🙏', shouldHandoff };
   } catch (e: any) {
     console.error('[AI] ❌ processBotMessage failed:', e?.response?.status, e?.response?.data?.error?.message || e?.response?.data?.message || e?.message);
     return {
-      reply: 'ได้รับข้อความแล้วนะคะ 🙏 ทีมงานจะรีบตอบกลับโดยเร็วที่สุดค่ะ',
-      shouldHandoff: true,
+      reply: 'ได้รับข้อความแล้วนะคะ 🙏 รบกวนพิมพ์คำถามอีกครั้งได้เลยค่ะ',
+      shouldHandoff: false, // AI ล่มก็ไม่สลับ human — บอทดูแลต่อ
     };
   }
 }

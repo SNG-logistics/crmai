@@ -99,6 +99,11 @@ async function handleTelegramWebhook(req: Request, res: Response) {
         data: { tenantId, companyId, contactId: contact.id, channel: 'telegram', channelId: chatId, status: 'bot', isBot: true },
       });
     }
+    if (!conversation.isBot) {
+      conversation = await prisma.conversation.update({
+        where: { id: conversation.id }, data: { isBot: true, status: 'bot' },
+      });
+    }
 
     // Save message
     const message = await prisma.message.create({
@@ -143,15 +148,8 @@ async function handleTelegramWebhook(req: Request, res: Response) {
           console.warn(`[TG Bot] phone number reply failed:`, e.message);
         }
 
-        // Handoff to human immediately
-        await prisma.conversation.update({
-          where: { id: conversation.id },
-          data: { isBot: false, status: 'pending' },
-        });
-        emitToTenant(tenantId, 'conversation_updated', {
-          conversationId: conversation.id, status: 'pending', isBot: false,
-        });
-        console.log(`[TG Bot] 🔄 Handoff (phone number received) conversation=${conversation.id}`);
+        // Keep bot mode active; admins may still reply directly from the inbox.
+        console.log(`[TG Bot] Phone number received; bot remains active conversation=${conversation.id}`);
         return;
       }
 
@@ -194,7 +192,7 @@ async function handleTelegramWebhook(req: Request, res: Response) {
           });
           if (captured) profileForBot = captured;
         }
-        let reply: string; let shouldHandoff = false;
+        let reply: string;
         if (isRegisterIntent(normalized.content) && !mightContainCustomerInfo(normalized.content)) {
           reply = buildRegisterReply(profileForBot);
         } else {
@@ -204,9 +202,9 @@ async function handleTelegramWebhook(req: Request, res: Response) {
             conversation.companyId,
             { profileContext: buildProfileContext(profileForBot) },
           );
-          reply = r.reply; shouldHandoff = r.shouldHandoff;
+          reply = r.reply;
         }
-        console.log(`[TG Bot] tenant=${tenantId} reply="${reply.substring(0,60)}" handoff=${shouldHandoff}`);
+        console.log(`[TG Bot] tenant=${tenantId} reply="${reply.substring(0,60)}"`);
 
         await sendTelegramMessage(chatId, reply, botToken);
         console.log(`[TG Bot] ✅ Reply sent to chatId=${chatId}`);
@@ -221,16 +219,7 @@ async function handleTelegramWebhook(req: Request, res: Response) {
           contact, channel: 'telegram',
         });
 
-        if (shouldHandoff) {
-          await prisma.conversation.update({
-            where: { id: conversation.id },
-            data: { isBot: false, status: 'pending' },
-          });
-          emitToTenant(tenantId, 'conversation_updated', {
-            conversationId: conversation.id, status: 'pending', isBot: false,
-          });
-          console.log(`[TG Bot] 🔄 Handoff to agent`);
-        }
+        // Never switch to human mode automatically.
       } catch (aiError: any) {
         console.error('[TG Bot] ❌ AI error:', aiError?.message || aiError);
         // Fallback message ถึงลูกค้า

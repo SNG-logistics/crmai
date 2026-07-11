@@ -183,6 +183,11 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
         },
       });
     }
+    if (!conversation.isBot) {
+      conversation = await prisma.conversation.update({
+        where: { id: conversation.id }, data: { isBot: true, status: 'bot' },
+      });
+    }
 
     // 3. Message (แนบ URL สื่อลง metadata)
     const message = await prisma.message.create({
@@ -227,9 +232,7 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, userMess
         data: { conversationId, tenantId, senderType: 'bot', type: 'text', content: REPEAT_HANDOFF_REPLY },
       });
       emitToTenant(tenantId, 'new_message', { conversationId, companyId, channel: 'whatsapp', message: { ...botMsg, senderType: 'bot' } });
-      await prisma.conversation.update({ where: { id: conversationId }, data: { isBot: false, status: 'pending' } });
-      emitToTenant(tenantId, 'conversation_updated', { conversationId, companyId, status: 'pending', isBot: false });
-      console.log(`[WA] 🛡️ Repeat abuse → handoff conversation=${conversationId} count=${abuse.count}`);
+      console.log(`[WA] 🛡️ Repeat abuse → bot remains active conversation=${conversationId} count=${abuse.count}`);
       return;
     }
 
@@ -241,16 +244,13 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, userMess
     }));
 
     // ใช้ AI config ของ "บริษัท" ที่บทสนทนานี้สังกัด
-    const { reply, shouldHandoff } = await processBotMessage(tenantId, conversationHistory, userMessage, undefined, companyId);
+    const { reply } = await processBotMessage(tenantId, conversationHistory, userMessage, undefined, companyId);
 
     await trySend(accountId, jid, reply);
     const botMsg = await prisma.message.create({ data: { conversationId, tenantId, senderType: 'bot', type: 'text', content: reply } });
     emitToTenant(tenantId, 'new_message', { conversationId, companyId, channel: 'whatsapp', message: { ...botMsg, senderType: 'bot' } });
 
-    if (shouldHandoff) {
-      await prisma.conversation.update({ where: { id: conversationId }, data: { isBot: false, status: 'pending' } });
-      emitToTenant(tenantId, 'conversation_updated', { conversationId, companyId, status: 'pending', isBot: false });
-    }
+    // Never hand off automatically. An admin can send a reply directly from the inbox.
   } catch (err) {
     console.error('[WA] Bot reply error:', err);
   }

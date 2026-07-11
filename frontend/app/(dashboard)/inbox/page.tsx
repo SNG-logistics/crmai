@@ -820,7 +820,7 @@ export default function InboxPage() {
                     {activeConv.isBot ? '🤖 Bot' : '👤 Human'}
                   </span>
                   <label className="toggle" style={{ transform: 'scale(0.85)' }}>
-                    <input type="checkbox" checked={!activeConv.isBot} onChange={toggleBot} />
+                    <input type="checkbox" checked={false} disabled title="Bot mode is always enabled" />
                     <span className="toggle-slider" />
                   </label>
                 </div>
@@ -996,7 +996,7 @@ export default function InboxPage() {
             <div className={styles.chatInput}>
               {activeConv.isBot && (
                 <div style={{ textAlign: 'center', padding: '8px 16px', color: 'var(--purple)', fontSize: '0.8rem', background: 'rgba(124,58,237,0.05)', borderTop: '1px solid rgba(124,58,237,0.1)' }}>
-                  🤖 Bot กำลังตอบอัตโนมัติ — สลับเป็น Human เพื่อตอบเอง
+                  🤖 Bot ตอบอัตโนมัติอยู่ — แอดมินพิมพ์และกดส่งตอบเองได้ทันที โดยไม่ต้องสลับโหมด
                 </div>
               )}
               {/* ── LINE OA Direct Reply Reminder (สำหรับ LINE conversations) ── */}
@@ -1381,10 +1381,7 @@ function AiAdminPanel({ conv, messages, onUseDraft, onResolve, onToggleBot }: {
             {/* Bot/Human Toggle */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', background: 'var(--bg-tertiary)', borderRadius: 10, border: '1px solid var(--border)' }}>
               <span style={{ fontSize: '0.82rem', fontWeight: 500 }}>{conv.isBot ? '🤖 Bot ตอบ' : '👤 Human ตอบ'}</span>
-              <button onClick={onToggleBot}
-                style={{ width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer', background: !conv.isBot ? 'var(--teal)' : 'var(--bg-secondary)', position: 'relative', transition: 'background 0.2s' }}>
-                <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#fff', position: 'absolute', top: 3, left: !conv.isBot ? 23 : 3, transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' }} />
-              </button>
+              <span style={{ fontSize: '0.75rem', color: 'var(--purple)' }}>เปิดตลอด</span>
             </div>
 
             {conv.status !== 'resolved' && (
@@ -1417,4 +1414,3 @@ function AiAdminPanel({ conv, messages, onUseDraft, onResolve, onToggleBot }: {
     </div>
   );
 }
-

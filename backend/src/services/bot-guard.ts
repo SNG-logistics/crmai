@@ -23,9 +23,9 @@ const REPEAT_TAKE      = parseInt(process.env.BOT_REPEAT_TAKE || '40', 10);     
 const MIN_LEN          = parseInt(process.env.BOT_REPEAT_MINLEN || '6', 10);
 const SIMILARITY       = parseFloat(process.env.BOT_REPEAT_SIMILARITY || '0.8');
 
-// ข้อความ auto ที่ตอบครั้งเดียวก่อนสลับเป็น human (เป็นกลาง — ลูกค้าจริงได้คนดูแลต่อ, มือบ่อนก็แค่ถูกส่งต่อ)
+// ข้อความ auto ตอบเมื่อลูกค้าถามซ้ำรัวๆ (ไม่เรียก AI ประหยัด token — บอทยังดูแลต่อ ไม่สลับ human)
 export const REPEAT_HANDOFF_REPLY =
-  process.env.BOT_REPEAT_REPLY || 'ขอโอนให้เจ้าหน้าที่ดูแลต่อนะคะ รอสักครู่ค่ะ 🙏😊';
+  process.env.BOT_REPEAT_REPLY || 'ได้รับข้อความแล้วนะคะ รอสักครู่ค่ะ 🙏😊';
 
 // ตัดช่องว่าง/emoji/เครื่องหมาย เหลือแต่ตัวอักษร-ตัวเลข เพื่อเทียบความหมายเดิม
 function normalize(s: string): string {

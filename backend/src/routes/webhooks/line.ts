@@ -48,6 +48,11 @@ async function resolveLineConvo(tenantId: string, userId: string, profile: any) 
       data: { tenantId, companyId, contactId: contact.id, channel: 'line', channelId: userId, status: 'bot', isBot: true },
     });
   }
+  if (!conversation.isBot) {
+    conversation = await prisma.conversation.update({
+      where: { id: conversation.id }, data: { isBot: true, status: 'bot' },
+    });
+  }
   return { contact, conversation };
 }
 
@@ -713,8 +718,8 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
   const isGameQuery = isHotGamesQuery(normalized.content) || (btConfig ? matchBonusTimeKeyword(normalized.content, btConfig) : false);
 
   // ════════════════════════════════════════════════════════════════════════════
-  // 🛡️ กันสแปม/มือบ่อนถามซ้ำความหมายเดิม ≥10 ครั้ง/นาที → สลับเป็น human
-  //     (ยกเว้นคำถามเกี่ยวกับเกม — ตอบเสมอ)
+  // 🛡️ กันสแปม/มือบ่อนถามซ้ำความหมายเดิม ≥10 ครั้ง/นาที → ตอบ auto ไม่เรียก AI (ประหยัด token)
+  //     บอทยังดูแลต่อ ไม่สลับ human (ยกเว้นคำถามเกี่ยวกับเกม — ตอบเสมอ)
   // ════════════════════════════════════════════════════════════════════════════
   const abuse = isGameQuery ? { repeat: false, count: 0 } : await checkRepeatAbuse(conversation.id, normalized.content);
   if (abuse.repeat) {
@@ -734,17 +739,9 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
         contact, channel: 'line',
       });
     } catch (e: any) {
-      console.warn(`[LINE Bot] repeat handoff reply failed:`, e.message);
+      console.warn(`[LINE Bot] repeat guard reply failed:`, e.message);
     }
-
-    await prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { isBot: false, status: 'pending' },
-    });
-    emitToTenant(tenantId, 'conversation_updated', {
-      conversationId: conversation.id, status: 'pending', isBot: false,
-    });
-    console.log(`[LINE Bot] 🛡️ Repeat abuse → handoff conversation=${conversation.id} count=${abuse.count}`);
+    console.log(`[LINE Bot] 🛡️ Repeat abuse → auto reply (bot ยังดูแลต่อ) conversation=${conversation.id} count=${abuse.count}`);
     return;
   }
 
@@ -806,15 +803,8 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
       console.warn(`[LINE Bot] phone number reply failed:`, e.message);
     }
 
-    // Handoff to human immediately
-    await prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { isBot: false, status: 'pending' },
-    });
-    emitToTenant(tenantId, 'conversation_updated', {
-      conversationId: conversation.id, status: 'pending', isBot: false,
-    });
-    console.log(`[LINE Bot] 🔄 Handoff (phone number received) conversation=${conversation.id}`);
+    // 🤖 บอทดูแลต่อ — ไม่สลับ human (แอดมินเห็นข้อมูลใน inbox อยู่แล้ว)
+    console.log(`[LINE Bot] 📞 Phone number received (bot ยังดูแลต่อ) conversation=${conversation.id}`);
     return;
   }
 
@@ -896,8 +886,8 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     console.log(`[LINE Bot] 💳 Payment issue detected | hasSlip=${hasSlip}`);
 
     if (hasSlip) {
-      // มีสลิปอยู่แล้ว → ตอบรับ + handoff ทันที
-      const reply = `รับทราบค่ะ เห็นว่าส่งสลิปไว้แล้ว โอนให้เจ้าหน้าที่ดูแลต่อเลยนะคะ ⏳`;
+      // มีสลิปอยู่แล้ว → ตอบรับ กำลังตรวจสอบ (บอทดูแลต่อ ไม่สลับ human)
+      const reply = `รับทราบค่ะ เห็นว่าส่งสลิปไว้แล้ว กำลังตรวจสอบให้นะคะ รอสักครู่ค่ะ ⏳`;
       try {
         if (normalized.replyToken) {
           await sendLineReply(normalized.replyToken, [lineTextMessage(reply)], accessToken);
@@ -919,10 +909,10 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
       // Handoff ทันที
       await prisma.conversation.update({
         where: { id: conversation.id },
-        data: { isBot: false, status: 'pending' },
+        data: { isBot: true, status: 'bot' },
       });
       emitToTenant(tenantId, 'conversation_updated', {
-        conversationId: conversation.id, status: 'pending', isBot: false,
+        conversationId: conversation.id, status: 'bot', isBot: true,
       });
       console.log(`[LINE Bot] 🔄 Handoff (payment issue + has slip) conversation=${conversation.id}`);
     } else {
@@ -978,7 +968,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     const inRegisterFlow = /✅|รบกวนลูกค้าแจ้งข้อมูล|ขอเพิ่มอีกนิด|ยืนยันว่าข้อมูลถูกต้อง/.test(lastBotMsg);
 
     let reply: string;
-    let shouldHandoff = false;
+    const shouldHandoff = false;
     if (isRegisterIntent(normalized.content) && !mightContainCustomerInfo(normalized.content)) {
       // ลูกค้า "ถามเรื่องสมัคร" (ยังไม่ได้ให้ข้อมูล) → ส่งฟอร์ม/ขอเฉพาะที่ขาด แบบตายตัว
       reply = buildRegisterReply(profileForBot);
@@ -987,7 +977,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
       // ลูกค้ากำลังส่งข้อมูลสมัครตามที่ขอ → บันทึกแล้วตอบตามข้อมูลจริง (ขาดอะไรขอต่อ / ครบแล้วทวนยืนยัน)
       reply = buildRegisterReply(profileForBot);
       // ครบทุกช่องแล้ว → โอนให้แอดมินดำเนินการสมัครต่อ
-      shouldHandoff = missingRegisterFields(profileForBot).length === 0;
+      void missingRegisterFields(profileForBot);
       console.log(`[LINE Bot] 📝 register-info received conv=${conversation.id} handoff=${shouldHandoff}`);
     } else {
       const r = await processBotMessage(
@@ -1002,7 +992,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
         { bonusTimeActive: !!btConfig, profileContext },
       );
       reply = r.reply;
-      shouldHandoff = r.shouldHandoff;
+      void r.shouldHandoff;
     }
 
     // ⚡ AI ตัดสินใจเรียก BONUS TIME เอง (ตอบด้วยโทเคน [[BONUSTIME]])
@@ -1057,10 +1047,10 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     if (shouldHandoff) {
       await prisma.conversation.update({
         where: { id: conversation.id },
-        data: { isBot: false, status: 'pending' },
+        data: { isBot: true, status: 'bot' },
       });
       emitToTenant(tenantId, 'conversation_updated', {
-        conversationId: conversation.id, status: 'pending', isBot: false,
+        conversationId: conversation.id, status: 'bot', isBot: true,
       });
       console.log(`[LINE Bot] 🔄 Handoff to agent conversation=${conversation.id}`);
     }
@@ -1084,10 +1074,10 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
       });
       await prisma.conversation.update({
         where: { id: conversation.id },
-        data: { isBot: false, status: 'pending' },
+        data: { isBot: true, status: 'bot' },
       });
       emitToTenant(tenantId, 'conversation_updated', {
-        conversationId: conversation.id, status: 'pending', isBot: false,
+        conversationId: conversation.id, status: 'bot', isBot: true,
       });
     } catch (fallbackErr) {
       console.error('[LINE Bot] ❌ Fallback send also failed:', fallbackErr);
@@ -1179,10 +1169,10 @@ async function verifySlipFromLine(opts: {
     if (result.status === 'fake' || result.status === 'error') {
       await prisma.conversation.update({
         where: { id: conversationId },
-        data: { isBot: false, status: 'pending' },
+        data: { isBot: true, status: 'bot' },
       });
       emitToTenant(tenantId, 'conversation_updated', {
-        conversationId, status: 'pending', isBot: false,
+        conversationId, status: 'bot', isBot: true,
       });
       console.log(`[SlipVerify] 🔄 Handoff to agent (${result.status}) conversation=${conversationId}`);
     }

@@ -83,7 +83,7 @@ async function seed() {
   // Demo conversations
   const conv1 = await prisma.conversation.upsert({
     where: { tenantId_channel_channelId: { tenantId: demoTenant.id, channel: 'line', channelId: 'U1234567890abcdef' } },
-    create: { tenantId: demoTenant.id, contactId: contact1.id, channel: 'line', channelId: 'U1234567890abcdef', status: 'open', isBot: false, assignedToId: agent.id, lastMessageAt: new Date() },
+    create: { tenantId: demoTenant.id, contactId: contact1.id, channel: 'line', channelId: 'U1234567890abcdef', status: 'bot', isBot: true, assignedToId: agent.id, lastMessageAt: new Date() },
     update: {},
   });
 

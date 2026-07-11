@@ -201,17 +201,16 @@ router.post('/:id/messages', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/conversations/:id/handoff - Toggle bot/human */
+/** POST /api/conversations/:id/handoff - Bot mode is permanently enabled. */
 router.post('/:id/handoff', async (req: Request, res: Response) => {
   try {
-    const { toHuman } = req.body;
     const target = await prisma.conversation.findFirst({ where: { id: req.params.id, tenantId: req.tenantId }, select: { companyId: true } });
     if (!target) return res.status(404).json({ success: false, message: 'ไม่พบบทสนทนา' });
     const allowedH = await getUserCompanyIds(req.user!.id);
     if (!canAccessCompany(allowedH, target.companyId)) return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์จัดการบทสนทนาของบริษัทนี้' });
     const conversation = await prisma.conversation.update({
       where: { id: req.params.id, tenantId: req.tenantId },
-      data: { isBot: !toHuman, status: toHuman ? 'open' : 'bot', ...(toHuman && { assignedToId: req.user!.id }) },
+      data: { isBot: true, status: 'bot' },
     });
     emitToTenant(req.tenantId!, 'conversation_updated', conversation);
     res.json({ success: true, conversation });
@@ -516,6 +515,5 @@ router.post('/:id/sync-line', async (req: Request, res: Response) => {
 });
 
 export default router;
-
 
 
