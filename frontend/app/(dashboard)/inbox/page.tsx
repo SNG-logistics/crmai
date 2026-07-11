@@ -327,6 +327,9 @@ export default function InboxPage() {
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [showCanned, setShowCanned] = useState(false);
   const [cannedFilter, setCannedFilter] = useState('');
+  // ─── Key ลัด (AI Quick Replies จาก DB) ────────────────────────────────────
+  const [quickReplies, setQuickReplies] = useState<any[]>([]);
+  const [composingQR, setComposingQR] = useState<string | null>(null);
   const [totalUnread, setTotalUnread] = useState(0);
   // ─── External Reply Detection ───────────────────────────────────────────────
   // true = มีสัญญาณว่า admin ตอบนอก CRM (ลูกค้าส่งล่าสุด แต่ใน DB ไม่มี agent reply ตามมา
@@ -361,6 +364,8 @@ export default function InboxPage() {
   // โหลดรายชื่อบริษัท (สำหรับตัวกรอง) — ถ้ามีมากกว่า 1 บริษัทจะโชว์ dropdown
   useEffect(() => {
     api.get('/companies').then(r => setCompanies(r.data.companies || [])).catch(() => {});
+    // โหลด key ลัดของ tenant
+    api.get('/quick-replies').then(r => setQuickReplies((r.data.items || []).filter((i: any) => i.isActive))).catch(() => {});
   }, []);
 
   // อัปเดตตัวเลข "X ใหม่" บนหัว list ให้ตามจำนวนห้องที่ยังไม่อ่าน (เรียลไทม์)
@@ -632,6 +637,32 @@ export default function InboxPage() {
   const filteredCanned = CANNED.filter(c =>
     c.trigger.includes(cannedFilter) || c.text.toLowerCase().includes(cannedFilter.slice(1).toLowerCase())
   );
+
+  // ─── Key ลัดจาก DB filtered ───────────────────────────────────────────────
+  const filteredQuickReplies = quickReplies.filter(q =>
+    q.trigger.includes(cannedFilter.toLowerCase()) ||
+    q.title.toLowerCase().includes(cannedFilter.slice(1).toLowerCase()) ||
+    q.content.toLowerCase().includes(cannedFilter.slice(1).toLowerCase())
+  );
+
+  // กด key ลัด → AI แต่งคำตอบจากเนื้อหา + บริบทแชท → ใส่ช่องพิมพ์ให้ตรวจก่อนส่ง
+  const applyQuickReply = async (q: any) => {
+    setShowCanned(false);
+    if (!q.aiCompose) { setNewMsg(q.content); textareaRef.current?.focus(); return; }
+    if (composingQR) return;
+    setComposingQR(q.id);
+    const toastId = toast.loading(`⚡ AI กำลังแต่งคำตอบ "${q.title}"...`);
+    try {
+      const r = await api.post(`/quick-replies/${q.id}/compose`, { conversationId: activeConv?.id });
+      setNewMsg(r.data.text || q.content);
+      toast.success('⚡ ใส่คำตอบในช่องพิมพ์แล้ว — ตรวจแล้วกดส่งได้เลย', { id: toastId });
+      textareaRef.current?.focus();
+    } catch (e: any) {
+      toast.error(e.response?.data?.message || 'AI แต่งคำตอบไม่สำเร็จ', { id: toastId });
+      setNewMsg(q.content); // fallback เนื้อหาดิบ
+      textareaRef.current?.focus();
+    } finally { setComposingQR(null); }
+  };
 
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
@@ -922,17 +953,42 @@ export default function InboxPage() {
             )}
 
             {/* Canned Responses Popup */}
-            {showCanned && filteredCanned.length > 0 && (
+            {showCanned && (filteredQuickReplies.length > 0 || filteredCanned.length > 0) && (
               <div className={styles.cannedPopup}>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', padding: '8px 12px 4px', borderBottom: '1px solid var(--border)' }}>
-                  ⚡ Quick Replies
-                </div>
-                {filteredCanned.map(c => (
-                  <div key={c.trigger} className={styles.cannedItem} onClick={() => { setNewMsg(c.text); setShowCanned(false); textareaRef.current?.focus(); }}>
-                    <span style={{ color: 'var(--teal)', fontWeight: 600, fontSize: '0.8rem', minWidth: 60 }}>{c.trigger}</span>
-                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.text}</span>
-                  </div>
-                ))}
+                {/* ── Key ลัด (AI) จาก DB ── */}
+                {filteredQuickReplies.length > 0 && (
+                  <>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', padding: '8px 12px 4px', borderBottom: '1px solid var(--border)' }}>
+                      🤖 Key ลัด — AI แต่งคำตอบให้เข้ากับแชท
+                    </div>
+                    {filteredQuickReplies.map(q => (
+                      <div key={q.id} className={styles.cannedItem}
+                        onClick={() => applyQuickReply(q)}
+                        style={{ opacity: composingQR && composingQR !== q.id ? 0.5 : 1 }}>
+                        <span style={{ color: 'var(--purple)', fontWeight: 600, fontSize: '0.8rem', minWidth: 60 }}>
+                          {composingQR === q.id ? '⏳' : q.trigger}
+                        </span>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {q.aiCompose ? '🤖 ' : ''}{q.title} — {q.content}
+                        </span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {/* ── Quick Replies เดิม (แทรกตรงๆ) ── */}
+                {filteredCanned.length > 0 && (
+                  <>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', padding: '8px 12px 4px', borderBottom: '1px solid var(--border)' }}>
+                      ⚡ Quick Replies
+                    </div>
+                    {filteredCanned.map(c => (
+                      <div key={c.trigger} className={styles.cannedItem} onClick={() => { setNewMsg(c.text); setShowCanned(false); textareaRef.current?.focus(); }}>
+                        <span style={{ color: 'var(--teal)', fontWeight: 600, fontSize: '0.8rem', minWidth: 60 }}>{c.trigger}</span>
+                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.text}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
               </div>
             )}
 

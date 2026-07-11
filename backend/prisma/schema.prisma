@@ -48,6 +48,7 @@ model Tenant {
   bonusTimeConfigs  BonusTimeConfig[]
   bonusTimeCamps    BonusTimeCamp[]
   bonusTimeGames    BonusTimeGame[]
+  quickReplies      QuickReply[]
 }
 
 // =============================================
@@ -351,6 +352,27 @@ model KnowledgeBase {
   isActive    Boolean   @default(true)
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
+}
+
+// =============================================
+// Quick Replies (Key ลัด — AI-composed canned responses)
+// =============================================
+
+model QuickReply {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  trigger   String   // เช่น "/deposit" — พิมพ์ในช่องแชทเพื่อเรียก
+  title     String   // ชื่อเรียกสั้นๆ เช่น "วิธีฝากเงิน"
+  content   String   // เนื้อหา/ข้อมูลดิบที่ AI ใช้แต่งคำตอบ
+  category  String   @default("ทั่วไป")
+  aiCompose Boolean  @default(true)  // true = AI แต่งคำใหม่ตามบริบท, false = แทรกข้อความตรงๆ
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, trigger])
+  @@index([tenantId])
 }
 
 // =============================================

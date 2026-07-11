@@ -332,3 +332,53 @@ export async function enchantReply(opts: {
     return { lang: t.lang, thai: t.thai, suggestions: [{ tone: 'friendly', text: t.thai }] };
   }
 }
+
+// ─── Quick Reply Compose — Key ลัด ────────────────────────────────────────────
+//  แอดมินกด key ลัด → AI เอา "เนื้อหา" ที่บันทึกไว้ มาแต่งเป็นคำตอบใหม่
+//  ให้เข้ากับบริบทบทสนทนา/คำถามล่าสุดของลูกค้า แล้วส่งกลับไปใส่ช่องพิมพ์
+export async function composeQuickReply(opts: {
+  content: string;    // เนื้อหาดิบของ key ลัด
+  title?: string;
+  conversationHistory: { role: 'user' | 'assistant'; content: string }[];
+  contactProfile?: { displayName?: string; memberType?: string; depositCount?: number };
+  styleSamples?: string[];
+}): Promise<string> {
+  const { content, title, conversationHistory, contactProfile, styleSamples = [] } = opts;
+
+  const lastCustomer = [...conversationHistory].reverse().find(m => m.role === 'user')?.content || '';
+  const inThreadStyle = conversationHistory.filter(m => m.role === 'assistant').slice(-3).map(m => m.content);
+  const styleRef = [...inThreadStyle, ...styleSamples]
+    .map(s => (s || '').trim())
+    .filter(s => s.length > 2 && !s.startsWith('[SYNC_NOTE]'))
+    .slice(0, 6);
+
+  const systemPrompt = `คุณเป็นผู้ช่วยแอดมิน CRM ตอบลูกค้าภาษาไทย
+แอดมินกด "key ลัด" ที่บันทึก "เนื้อหาคำตอบ" ไว้ล่วงหน้า หน้าที่ของคุณคือเอาเนื้อหานั้นมาเรียบเรียงเป็นข้อความตอบลูกค้า 1 ข้อความ ให้เข้ากับคำถาม/บริบทล่าสุดของลูกค้า
+
+กฎเหล็ก:
+- ยึดข้อเท็จจริงจาก "เนื้อหา key ลัด" เท่านั้น ห้ามแต่งเติมข้อมูล ตัวเลข ขั้นตอน หรือโปรโมชั่นที่ไม่ได้อยู่ในเนื้อหา
+- ถ้าลูกค้าถามเจาะจง ให้ตอบส่วนที่ตรงคำถามก่อน ไม่ต้องเทเนื้อหาทั้งหมด
+- ภาษาพูดสุภาพ เป็นธรรมชาติ ไม่เกิน 3-4 ประโยค ใส่ emoji ได้เล็กน้อย
+- เลียนแบบสไตล์/คำลงท้ายจากตัวอย่างคำตอบเดิมของทีม (ถ้ามี)
+- ตอบเป็นข้อความเดียว ไม่ต้องมีคำอธิบายอื่น`;
+
+  const userParts: string[] = [];
+  if (lastCustomer) userParts.push(`ข้อความล่าสุดจากลูกค้า: "${lastCustomer}"`);
+  if (contactProfile?.displayName) userParts.push(`ลูกค้า: ${contactProfile.displayName}`);
+  if (styleRef.length) userParts.push(`ตัวอย่างสไตล์การตอบของทีม:\n${styleRef.map(s => `- ${s}`).join('\n')}`);
+  userParts.push(`เนื้อหา key ลัด${title ? ` (${title})` : ''}:\n"""${content}"""`);
+  userParts.push('เรียบเรียงเป็นข้อความตอบลูกค้า 1 ข้อความ:');
+
+  const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
+    { role: 'system', content: systemPrompt },
+    ...conversationHistory.slice(-4).map(m => ({ role: m.role, content: m.content })),
+    { role: 'user', content: userParts.join('\n\n') },
+  ];
+
+  try {
+    const reply = await generateAIResponse(messages, DEFAULT_MODEL, 0.7, 300);
+    return reply || content;
+  } catch {
+    return content; // AI ล่ม → คืนเนื้อหาดิบให้แอดมินแก้เอง
+  }
+}

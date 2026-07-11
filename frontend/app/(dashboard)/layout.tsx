@@ -11,6 +11,7 @@ import { connectSocket, disconnectSocket, useSocket } from '../../lib/socket';
 const NAV_KEYS = [
   { href: '/dashboard',        icon: '🏠', key: 'nav_dashboard'  },
   { href: '/inbox',            icon: '💬', key: 'nav_inbox'      },
+  { href: '/quick-replies',    icon: '⚡', key: 'nav_quickreplies' },
   { href: '/telesales',        icon: '📞', key: 'nav_telesales'  },
   { href: '/contacts',         icon: '👥', key: 'nav_contacts'   },
   { href: '/tickets',          icon: '🎟️', key: 'nav_tickets'   },
