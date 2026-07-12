@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
-import { composeQuickReply } from '../services/ai.service';
 
 const router = Router();
 router.use(verifyToken);
@@ -37,7 +36,7 @@ router.post('/', async (req: Request, res: Response) => {
         title: title.trim(),
         content: content.trim(),
         category: (category || 'ทั่วไป').trim(),
-        aiCompose: aiCompose !== false,
+        aiCompose: aiCompose === true,   // ค่าเริ่มต้น: ตอบตรงตามที่ตั้งไว้ (ไม่ให้ AI แต่งใหม่)
       },
     });
     res.json({ success: true, item });
@@ -82,55 +81,15 @@ router.delete('/:id', async (req: Request, res: Response) => {
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-/** POST /api/quick-replies/:id/compose — AI แต่งคำตอบจาก key ลัด + บริบทบทสนทนา
- *  Body: { conversationId }
- *  Resp: { text }
+/** POST /api/quick-replies/:id/compose — คืนคำตอบของ key ลัด
+ *  ✅ Key ลัด = คำตอบสำเร็จรูปที่ตั้งไว้ → คืน "เนื้อหาที่ตั้งไว้เป๊ะๆ" เสมอ
+ *     (เดิมส่งเข้า AI แต่งใหม่ → เพี้ยน/ตอบมั่ว) แอดมินตรวจ/แก้ในช่องพิมพ์ได้ก่อนส่งอยู่แล้ว
  */
 router.post('/:id/compose', async (req: Request, res: Response) => {
   try {
     const qr = await prisma.quickReply.findFirst({ where: { id: req.params.id, tenantId: req.tenantId! } });
     if (!qr) return res.status(404).json({ success: false, message: 'ไม่พบ key ลัด' });
-
-    // ไม่ใช้ AI → คืนข้อความตรงๆ
-    if (!qr.aiCompose) return res.json({ success: true, text: qr.content });
-
-    const conversationId = (req.body?.conversationId || '').toString();
-    let history: { role: 'user' | 'assistant'; content: string }[] = [];
-    let contactProfile: { displayName?: string; memberType?: string; depositCount?: number } | undefined;
-
-    if (conversationId) {
-      const conv = await prisma.conversation.findFirst({
-        where: { id: conversationId, tenantId: req.tenantId! },
-        include: { contact: true, messages: { orderBy: { createdAt: 'asc' }, take: 20 } },
-      });
-      if (conv) {
-        history = (conv.messages as any[])
-          .filter((m: any) => m.type === 'text' && m.content)
-          .map((m: any) => ({
-            role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const,
-            content: m.content,
-          }));
-        const c: any = conv.contact;
-        contactProfile = { displayName: c?.displayName, memberType: c?.memberType, depositCount: c?.depositCount };
-      }
-    }
-
-    // สไตล์การตอบของทีม
-    const recentAgentMsgs = await prisma.message.findMany({
-      where: { tenantId: req.tenantId!, senderType: 'agent', type: 'text' },
-      orderBy: { createdAt: 'desc' }, take: 8, select: { content: true },
-    });
-    const styleSamples = recentAgentMsgs.map(m => m.content).filter((c: string) => !!c && c.length > 2);
-
-    const text = await composeQuickReply({
-      content: qr.content,
-      title: qr.title,
-      conversationHistory: history,
-      contactProfile,
-      styleSamples,
-    });
-
-    res.json({ success: true, text });
+    return res.json({ success: true, text: qr.content });
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
 });
 

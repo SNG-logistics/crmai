@@ -99,11 +99,8 @@ async function handleTelegramWebhook(req: Request, res: Response) {
         data: { tenantId, companyId, contactId: contact.id, channel: 'telegram', channelId: chatId, status: 'bot', isBot: true },
       });
     }
-    if (!conversation.isBot) {
-      conversation = await prisma.conversation.update({
-        where: { id: conversation.id }, data: { isBot: true, status: 'bot' },
-      });
-    }
+    // ⚠️ เคารพโหมด Human: ถ้าแอดมินสลับเป็นคนดูแลแล้ว (isBot=false) ห้ามบังคับกลับเป็นบอท
+    //    (เดิมบรรทัดนี้ force isBot:true ทุกข้อความ → สลับ Human ไม่ติด)
 
     // Save message
     const message = await prisma.message.create({

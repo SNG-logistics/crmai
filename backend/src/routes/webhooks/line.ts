@@ -48,11 +48,7 @@ async function resolveLineConvo(tenantId: string, userId: string, profile: any) 
       data: { tenantId, companyId, contactId: contact.id, channel: 'line', channelId: userId, status: 'bot', isBot: true },
     });
   }
-  if (!conversation.isBot) {
-    conversation = await prisma.conversation.update({
-      where: { id: conversation.id }, data: { isBot: true, status: 'bot' },
-    });
-  }
+  // ⚠️ เคารพโหมด Human: ไม่บังคับกลับเป็นบอทเมื่อแอดมินดูแลอยู่ (isBot=false)
   return { contact, conversation };
 }
 

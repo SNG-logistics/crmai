@@ -201,16 +201,20 @@ router.post('/:id/messages', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/conversations/:id/handoff - Bot mode is permanently enabled. */
+/** POST /api/conversations/:id/handoff - สลับโหมด Bot ↔ Human
+ *  Body: { toHuman: boolean } — toHuman=true → คนดูแล (isBot=false), toHuman=false → บอทดูแล
+ */
 router.post('/:id/handoff', async (req: Request, res: Response) => {
   try {
     const target = await prisma.conversation.findFirst({ where: { id: req.params.id, tenantId: req.tenantId }, select: { companyId: true } });
     if (!target) return res.status(404).json({ success: false, message: 'ไม่พบบทสนทนา' });
     const allowedH = await getUserCompanyIds(req.user!.id);
     if (!canAccessCompany(allowedH, target.companyId)) return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์จัดการบทสนทนาของบริษัทนี้' });
+    // toHuman=true → คนดูแล (isBot=false, status=open) ; toHuman=false → บอทดูแล (isBot=true, status=bot)
+    const toHuman = req.body?.toHuman === true;
     const conversation = await prisma.conversation.update({
       where: { id: req.params.id, tenantId: req.tenantId },
-      data: { isBot: true, status: 'bot' },
+      data: toHuman ? { isBot: false, status: 'open' } : { isBot: true, status: 'bot' },
     });
     emitToTenant(req.tenantId!, 'conversation_updated', conversation);
     res.json({ success: true, conversation });

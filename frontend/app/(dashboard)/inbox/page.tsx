@@ -645,23 +645,11 @@ export default function InboxPage() {
     q.content.toLowerCase().includes(cannedFilter.slice(1).toLowerCase())
   );
 
-  // กด key ลัด → AI แต่งคำตอบจากเนื้อหา + บริบทแชท → ใส่ช่องพิมพ์ให้ตรวจก่อนส่ง
+  // กด key ลัด → ใส่ "คำตอบที่ตั้งไว้เป๊ะๆ" ลงช่องพิมพ์ ให้แอดมินตรวจ/แก้ก่อนกดส่ง
   const applyQuickReply = async (q: any) => {
     setShowCanned(false);
-    if (!q.aiCompose) { setNewMsg(q.content); textareaRef.current?.focus(); return; }
-    if (composingQR) return;
-    setComposingQR(q.id);
-    const toastId = toast.loading(`⚡ AI กำลังแต่งคำตอบ "${q.title}"...`);
-    try {
-      const r = await api.post(`/quick-replies/${q.id}/compose`, { conversationId: activeConv?.id });
-      setNewMsg(r.data.text || q.content);
-      toast.success('⚡ ใส่คำตอบในช่องพิมพ์แล้ว — ตรวจแล้วกดส่งได้เลย', { id: toastId });
-      textareaRef.current?.focus();
-    } catch (e: any) {
-      toast.error(e.response?.data?.message || 'AI แต่งคำตอบไม่สำเร็จ', { id: toastId });
-      setNewMsg(q.content); // fallback เนื้อหาดิบ
-      textareaRef.current?.focus();
-    } finally { setComposingQR(null); }
+    setNewMsg(q.content);
+    textareaRef.current?.focus();
   };
 
   // ─── Render ───────────────────────────────────────────────────────────────

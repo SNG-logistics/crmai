@@ -20,15 +20,38 @@ function checkHandoff(userMessage: string, aiReply: string, extraKeywords?: stri
   return false;
 }
 
-// ─── Smart KB Matching — keyword overlap scoring ─────────────────────────────
+// ─── Smart KB Matching — รองรับภาษาไทย/ลาว (ไม่มีช่องว่างระหว่างคำ) ────────────
+//  ปัญหาเดิม: split(/\s+/) ใช้ไม่ได้กับไทย/ลาว เพราะทั้งประโยคกลายเป็น 1 คำ → FAQ ไม่เคยแมตช์
+//  แก้: ใช้ (1) n-gram ตัวอักษร (bigram) วัดความคล้าย + (2) แมตช์คำ/วลีที่ทับซ้อนกัน
+function cleanKB(s: string): string {
+  return (s || '').toLowerCase().replace(/[^ก-๙຀-໿a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// bigram ของตัวอักษร (ตัด emoji/สัญลักษณ์ก่อน) — ใช้เทียบไทย/ลาวที่ไม่มีเว้นวรรค
+function charBigrams(s: string): Set<string> {
+  const t = cleanKB(s).replace(/\s+/g, '');
+  const set = new Set<string>();
+  for (let i = 0; i < t.length - 1; i++) set.add(t.slice(i, i + 2));
+  return set;
+}
+function bigramOverlap(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  return inter / Math.min(a.size, b.size); // 0-1 : สัดส่วนที่ประโยคสั้นกว่าถูกครอบคลุม
+}
+
 function scoreKB(kb: { question: string; answer: string }, userMessage: string): number {
-  const clean = (s: string) => s.toLowerCase().replace(/[^ก-๙a-z0-9\s]/g, '');
-  const msgWords = new Set(clean(userMessage).split(/\s+/).filter(w => w.length > 1));
-  const qWords   = new Set(clean(kb.question).split(/\s+/).filter(w => w.length > 1));
+  const msg = cleanKB(userMessage);
+  const q   = cleanKB(kb.question);
+  if (!msg || !q) return 0;
   let score = 0;
-  msgWords.forEach(w => { if (qWords.has(w)) score += 2; });
-  qWords.forEach(qw   => { if (userMessage.toLowerCase().includes(qw)) score += 1; });
-  msgWords.forEach(mw  => { if (kb.question.toLowerCase().includes(mw)) score += 1; });
+  // 1) ความคล้ายของตัวอักษร (ครอบคลุมไทย/ลาวที่ไม่มีเว้นวรรค) — น้ำหนักหลัก
+  score += bigramOverlap(charBigrams(userMessage), charBigrams(kb.question)) * 10; // 0-10
+  // 2) คำ/วลีของ FAQ ปรากฏในข้อความลูกค้า (เช่น "ถอน", "สมัคร", "โปร") — เจตนาที่ชัด
+  for (const w of new Set(q.split(' ').filter(w => w.length >= 2))) if (msg.includes(w)) score += 3;
+  // 3) คำของลูกค้าปรากฏในคำถาม FAQ
+  for (const w of new Set(msg.split(' ').filter(w => w.length >= 2))) if (q.includes(w)) score += 1;
   return score;
 }
 
@@ -162,12 +185,12 @@ export async function processBotMessage(
   const allKb = botConfig?.knowledgeBase || [];
   const relevantKb = allKb
     .map(kb => ({ ...kb, score: scoreKB(kb, userMessage) }))
-    .filter(kb => kb.score > 0)
+    .filter(kb => kb.score >= 2)          // ตัด noise ที่คล้ายเล็กน้อย เก็บเฉพาะที่เกี่ยวจริง
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
 
   const kbContext = relevantKb.length > 0
-    ? `\n\n—— FAQ ที่เกี่ยวข้อง (ใช้ก่อนตอบ) ——\n${relevantKb.map(kb => `Q: ${kb.question}\nA: ${kb.answer}`).join('\n')}`
+    ? `\n\n—— FAQ ที่เกี่ยวข้อง (เรียงจากตรงที่สุด — ใช้ตอบก่อนเสมอ) ——\n${relevantKb.map((kb, i) => `${i + 1}. Q: ${kb.question}\n   A: ${kb.answer}`).join('\n')}\n\n⚠️ ถ้าคำถามลูกค้าตรงกับ FAQ ข้อใด ให้ตอบตามคำตอบของ FAQ ข้อนั้นเป็นหลัก และตอบให้ตรงกับสิ่งที่ลูกค้าถามจริงๆ ห้ามตอบนอกเรื่อง`
     : '';
 
   // ─ Contact context ─

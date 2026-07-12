@@ -183,11 +183,8 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
         },
       });
     }
-    if (!conversation.isBot) {
-      conversation = await prisma.conversation.update({
-        where: { id: conversation.id }, data: { isBot: true, status: 'bot' },
-      });
-    }
+    // ⚠️ เคารพโหมด Human: ถ้าแอดมินสลับเป็นคนดูแลแล้ว (isBot=false) ห้ามบังคับกลับเป็นบอท
+    //    (เดิมบรรทัดนี้ force isBot:true ทุกข้อความ → สลับ Human ไม่ติด)
 
     // 3. Message (แนบ URL สื่อลง metadata)
     const message = await prisma.message.create({
