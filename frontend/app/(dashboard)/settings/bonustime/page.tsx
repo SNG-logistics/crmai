@@ -23,72 +23,38 @@ const LANG_OPTS = ['TH', 'EN', 'LO', 'CN', 'MY', 'VN'];
 
 // ─── Luxury theme CSS (animated bg, shimmer text, gold bars) ───────────────────
 const LUX_CSS = `
-.bt-lux{position:relative;overflow:hidden;min-height:calc(100vh - 40px);padding:26px 30px;
-  background:radial-gradient(1200px 600px at 15% -10%,rgba(197,138,32,.18),transparent 60%),
-             radial-gradient(1000px 700px at 110% 10%,rgba(255,196,66,.12),transparent 55%),
-             linear-gradient(160deg,#0b0a10 0%,#12101b 45%,#0c0b12 100%);}
-.bt-bg{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none}
-.bt-bg:before{content:"";position:absolute;inset:-40%;
-  background:conic-gradient(from 0deg,transparent 0deg,rgba(255,205,80,.06) 60deg,transparent 120deg,rgba(255,180,40,.05) 200deg,transparent 300deg);
-  animation:bt-spin 26s linear infinite}
-.bt-orb{position:absolute;border-radius:50%;filter:blur(70px);opacity:.5;mix-blend-mode:screen}
-.bt-o1{width:340px;height:340px;left:-60px;top:-40px;background:radial-gradient(circle,#e8b923,transparent 68%);animation:bt-float 15s ease-in-out infinite}
-.bt-o2{width:300px;height:300px;right:-40px;top:120px;background:radial-gradient(circle,#ffcf5c,transparent 70%);animation:bt-float 19s ease-in-out infinite reverse}
-.bt-o3{width:260px;height:260px;left:40%;bottom:-80px;background:radial-gradient(circle,#b8860b,transparent 72%);animation:bt-float2 22s ease-in-out infinite}
+/* เวอร์ชันเบา: ตัด blur/backdrop-filter/animation ที่กิน GPU+RAM ออก โหลดเร็วขึ้นมาก */
+.bt-lux{position:relative;min-height:calc(100vh - 40px);padding:26px 30px;background:#12101b}
+.bt-bg{display:none}
+.bt-orb{display:none}
 .bt-inner{position:relative;z-index:1;max-width:1060px;margin:0 auto}
-@keyframes bt-spin{to{transform:rotate(360deg)}}
-@keyframes bt-float{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(40px,30px) scale(1.12)}}
-@keyframes bt-float2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-50px,-24px) scale(1.15)}}
-@keyframes bt-shimmer{0%{background-position:-200% center}100%{background-position:200% center}}
-@keyframes bt-glow{0%,100%{box-shadow:0 0 0 1px rgba(255,215,0,.30),0 8px 26px rgba(0,0,0,.5),0 0 22px rgba(255,196,66,.10)}50%{box-shadow:0 0 0 1px rgba(255,215,0,.55),0 8px 26px rgba(0,0,0,.5),0 0 34px rgba(255,196,66,.28)}}
-@keyframes bt-fill{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-@keyframes bt-shine{0%{left:-45%}100%{left:130%}}
-.bt-title{margin:0;font-weight:900;letter-spacing:.5px;font-size:2rem;line-height:1.1;
-  background:linear-gradient(90deg,#9c6b12,#ffe9a8,#ffd700,#fff7db,#ffd700,#e8b923,#9c6b12);
-  background-size:200% auto;-webkit-background-clip:text;background-clip:text;color:transparent;
-  animation:bt-shimmer 5s linear infinite;filter:drop-shadow(0 2px 10px rgba(255,196,66,.25))}
+.bt-title{margin:0;font-weight:900;letter-spacing:.5px;font-size:2rem;line-height:1.1;color:#ffd700}
 .bt-sub{color:#c9b98e;font-size:.82rem;margin-top:6px;max-width:640px}
-.bt-panel{position:relative;background:linear-gradient(180deg,rgba(30,26,44,.72),rgba(18,16,26,.72));
-  backdrop-filter:blur(8px);border:1px solid rgba(255,215,0,.16);border-radius:16px;padding:18px;margin-bottom:18px}
+.bt-panel{background:#1a1726;border:1px solid rgba(255,215,0,.16);border-radius:12px;padding:18px;margin-bottom:18px}
 .bt-panel-h{font-weight:800;margin-bottom:12px;color:#f6e7bd;letter-spacing:.3px}
 .bt-gold{color:#ffd700}
-.bt-camp{position:relative;border:1px solid rgba(255,215,0,.45);border-radius:16px;padding:16px;margin-bottom:16px;
-  background:linear-gradient(180deg,rgba(38,31,17,.55),rgba(18,16,26,.72));animation:bt-glow 3.4s ease-in-out infinite}
-.bt-camp:before{content:"";position:absolute;inset:0;border-radius:16px;padding:1px;
-  background:linear-gradient(135deg,rgba(255,231,168,.9),rgba(184,134,11,.2),rgba(255,215,0,.7));
-  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
-  -webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;opacity:.7}
-.bt-in{width:100%;background:rgba(10,9,14,.75);border:1px solid rgba(255,215,0,.18);border-radius:9px;
-  padding:8px 10px;font-size:.85rem;color:#f4ecd6;outline:none;transition:border-color .2s,box-shadow .2s}
-.bt-in:focus{border-color:rgba(255,215,0,.6);box-shadow:0 0 0 3px rgba(255,196,66,.12)}
+.bt-camp{border:1px solid rgba(255,215,0,.35);border-radius:12px;padding:16px;margin-bottom:16px;background:#211b30}
+.bt-in{width:100%;background:#0e0d15;border:1px solid rgba(255,215,0,.18);border-radius:9px;padding:8px 10px;font-size:.85rem;color:#f4ecd6;outline:none}
+.bt-in:focus{border-color:rgba(255,215,0,.6)}
 .bt-lbl{font-size:.72rem;font-weight:700;color:#b7a578;margin-bottom:4px;letter-spacing:.3px}
-.bt-game{display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:12px;border-radius:12px;margin-top:10px;
-  background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01));border:1px solid rgba(255,215,0,.10)}
-.bt-thumb{width:52px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;cursor:pointer;display:flex;align-items:center;justify-content:center;
-  background:rgba(10,9,14,.8);border:1px solid rgba(255,215,0,.25);color:#8a7a4e;font-size:.6rem}
+.bt-game{display:flex;gap:14px;flex-wrap:wrap;align-items:center;padding:12px;border-radius:12px;margin-top:10px;background:rgba(255,255,255,.02);border:1px solid rgba(255,215,0,.10)}
+.bt-thumb{width:52px;height:40px;border-radius:8px;overflow:hidden;flex-shrink:0;cursor:pointer;display:flex;align-items:center;justify-content:center;background:#0e0d15;border:1px solid rgba(255,215,0,.25);color:#8a7a4e;font-size:.6rem}
 .bt-stat{min-width:120px;flex:1}
 .bt-stat-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px}
 .bt-stat-lbl{font-size:.66rem;color:#b7a578;font-weight:700;letter-spacing:.4px}
 .bt-stat-val{font-size:.9rem;font-weight:900}
-.bt-bar{position:relative;height:9px;border-radius:6px;background:rgba(255,255,255,.06);
-  border:1px solid rgba(255,215,0,.14);overflow:hidden}
-.bt-bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:6px;transform-origin:left;
-  animation:bt-fill 1.15s cubic-bezier(.2,.9,.2,1) both;box-shadow:0 0 12px rgba(255,196,66,.45)}
-.bt-bar-shine{position:absolute;top:0;bottom:0;width:38%;left:-45%;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.75),transparent);animation:bt-shine 2.4s linear infinite}
-.bt-num{width:52px;text-align:center;margin-top:5px;background:rgba(10,9,14,.75);border:1px solid rgba(255,215,0,.18);
-  border-radius:7px;padding:3px 4px;font-size:.78rem;color:#f4ecd6;outline:none}
-.bt-pill{font-size:.62rem;padding:2px 6px;border-radius:5px;cursor:pointer;border:1px solid rgba(255,215,0,.25);background:transparent;color:#b7a578;transition:.15s}
-.bt-pill.on{background:linear-gradient(135deg,#ffe9a8,#e8b923);color:#231a06;border-color:transparent;font-weight:800}
-.bt-btn{border:1px solid rgba(255,215,0,.4);background:linear-gradient(135deg,rgba(255,215,0,.14),rgba(184,134,11,.14));
-  color:#ffe9a8;border-radius:9px;padding:7px 14px;font-size:.82rem;font-weight:700;cursor:pointer;transition:.18s}
-.bt-btn:hover{background:linear-gradient(135deg,#ffe9a8,#e8b923);color:#231a06;box-shadow:0 6px 18px rgba(255,196,66,.3)}
-.bt-btn-solid{border:none;background:linear-gradient(135deg,#ffe9a8,#ffd700,#e8b923);color:#231a06;border-radius:10px;
-  padding:9px 18px;font-weight:900;cursor:pointer;box-shadow:0 6px 18px rgba(255,196,66,.35);transition:.18s}
-.bt-btn-solid:hover{filter:brightness(1.08);transform:translateY(-1px)}
+.bt-bar{position:relative;height:9px;border-radius:6px;background:rgba(255,255,255,.06);border:1px solid rgba(255,215,0,.14);overflow:hidden}
+.bt-bar-fill{position:absolute;left:0;top:0;bottom:0;border-radius:6px}
+.bt-bar-shine{display:none}
+.bt-num{width:52px;text-align:center;margin-top:5px;background:#0e0d15;border:1px solid rgba(255,215,0,.18);border-radius:7px;padding:3px 4px;font-size:.78rem;color:#f4ecd6;outline:none}
+.bt-pill{font-size:.62rem;padding:2px 6px;border-radius:5px;cursor:pointer;border:1px solid rgba(255,215,0,.25);background:transparent;color:#b7a578}
+.bt-pill.on{background:#e8b923;color:#231a06;border-color:transparent;font-weight:800}
+.bt-btn{border:1px solid rgba(255,215,0,.4);background:rgba(255,215,0,.12);color:#ffe9a8;border-radius:9px;padding:7px 14px;font-size:.82rem;font-weight:700;cursor:pointer}
+.bt-btn:hover{background:#e8b923;color:#231a06}
+.bt-btn-solid{border:none;background:linear-gradient(135deg,#ffe9a8,#ffd700,#e8b923);color:#231a06;border-radius:10px;padding:9px 18px;font-weight:900;cursor:pointer}
+.bt-btn-solid:hover{filter:brightness(1.05)}
 .bt-btn-danger{border:1px solid rgba(239,68,68,.35);background:transparent;color:#f87171;border-radius:8px;padding:5px 9px;cursor:pointer}
-.bt-toggle{display:flex;align-items:center;gap:9px;cursor:pointer;padding:9px 16px;border-radius:12px;font-weight:800;
-  border:1px solid rgba(255,215,0,.3)}
+.bt-toggle{display:flex;align-items:center;gap:9px;cursor:pointer;padding:9px 16px;border-radius:12px;font-weight:800;border:1px solid rgba(255,215,0,.3)}
 `;
 
 // ─── Animated gold % bar ───────────────────────────────────────────────────────
