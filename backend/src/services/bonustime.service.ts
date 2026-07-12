@@ -128,46 +128,58 @@ function emptyCell(): any {
   return { type: 'box', layout: 'vertical', flex: 1, contents: [{ type: 'filler' }] };
 }
 
-/** สร้างข้อความ LINE (array) สำหรับเมนูค่ายเกม */
+/** สร้างข้อความ LINE (array) สำหรับเมนูค่ายเกม
+ *  ⚠️ แบ่งค่ายเป็นหลายการ์ด (carousel) — กัน Flex เกิน limit ขนาด/จำนวน component ของ LINE
+ *     (เดิมยัดทุกค่ายลงการ์ดเดียว พอค่ายเยอะ (เช่น 30 ค่าย) LINE จะปฏิเสธ → เมนูไม่ขึ้น) */
 export function buildBonusTimeMenuMessages(config: BTConfig, camps: BTCamp[]): any[] {
-  const rows: any[] = [];
-  const perRow = 3;
-  for (let i = 0; i < camps.length; i += perRow) {
-    const slice = camps.slice(i, i + perRow);
-    const cells = slice.map(campCell);
-    while (cells.length < perRow) cells.push(emptyCell());
-    rows.push({ type: 'box', layout: 'horizontal', spacing: 'sm', margin: i === 0 ? 'md' : 'sm', contents: cells });
-  }
+  const PER_ROW = 3;
+  const CAMPS_PER_BUBBLE = 9;   // 3 แถว/การ์ด — เล็กพอไม่ชน limit ของ LINE
+  const MAX_BUBBLES = 12;       // LINE carousel รองรับสูงสุด 12 การ์ด
 
-  const bubble = {
-    type: 'bubble',
-    size: 'mega',
-    header: {
-      type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '16px', spacing: 'xs',
-      contents: [
-        { type: 'text', text: config.headerTitle, weight: 'bold', size: 'xl', color: GOLD_BRIGHT, align: 'center', wrap: true },
-        { type: 'text', text: config.headerSubtitle, size: 'xxs', color: GOLD_DIM, align: 'center', wrap: true },
-        {
-          type: 'box', layout: 'baseline', margin: 'md', justifyContent: 'center', spacing: 'sm',
-          contents: [{ type: 'text', text: '🟢 LIVE • อัปเดตเรียลไทม์', size: 'xs', color: '#10B981', weight: 'bold', align: 'center' }],
-        },
-      ],
-    },
-    body: {
-      type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '12px', spacing: 'sm',
-      contents: [
-        { type: 'text', text: config.intro, size: 'sm', color: GOLD_SOFT, wrap: true },
-        ...rows,
-      ],
-    },
-    footer: {
-      type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '10px',
-      contents: [{ type: 'text', text: config.footerNote, size: 'xxs', color: GOLD_DIM, wrap: true, align: 'center' }],
-    },
-    styles: { header: { separator: true, separatorColor: GOLD_LINE }, footer: { separator: true, separatorColor: GOLD_LINE } },
+  const chunks: BTCamp[][] = [];
+  for (let i = 0; i < camps.length; i += CAMPS_PER_BUBBLE) chunks.push(camps.slice(i, i + CAMPS_PER_BUBBLE));
+  const pages = chunks.slice(0, MAX_BUBBLES);
+  const totalPages = pages.length || 1;
+
+  const makeBubble = (slice: BTCamp[], pageIdx: number): any => {
+    const rows: any[] = [];
+    for (let i = 0; i < slice.length; i += PER_ROW) {
+      const cells = slice.slice(i, i + PER_ROW).map(campCell);
+      while (cells.length < PER_ROW) cells.push(emptyCell());
+      rows.push({ type: 'box', layout: 'horizontal', spacing: 'sm', margin: i === 0 ? 'md' : 'sm', contents: cells });
+    }
+    const liveText = totalPages > 1 ? `🟢 LIVE • หน้า ${pageIdx + 1}/${totalPages}` : '🟢 LIVE • อัปเดตเรียลไทม์';
+    const bodyContents: any[] = [];
+    if (pageIdx === 0) bodyContents.push({ type: 'text', text: config.intro, size: 'sm', color: GOLD_SOFT, wrap: true });
+    bodyContents.push(...rows);
+    return {
+      type: 'bubble', size: 'mega',
+      header: {
+        type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '16px', spacing: 'xs',
+        contents: [
+          { type: 'text', text: config.headerTitle, weight: 'bold', size: 'xl', color: GOLD_BRIGHT, align: 'center', wrap: true },
+          { type: 'text', text: config.headerSubtitle, size: 'xxs', color: GOLD_DIM, align: 'center', wrap: true },
+          {
+            type: 'box', layout: 'baseline', margin: 'md', justifyContent: 'center', spacing: 'sm',
+            contents: [{ type: 'text', text: liveText, size: 'xs', color: '#10B981', weight: 'bold', align: 'center' }],
+          },
+        ],
+      },
+      body: {
+        type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '12px', spacing: 'sm',
+        contents: bodyContents,
+      },
+      footer: {
+        type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '10px',
+        contents: [{ type: 'text', text: config.footerNote, size: 'xxs', color: GOLD_DIM, wrap: true, align: 'center' }],
+      },
+      styles: { header: { separator: true, separatorColor: GOLD_LINE }, footer: { separator: true, separatorColor: GOLD_LINE } },
+    };
   };
 
-  return [{ type: 'flex', altText: '⚡ BONUS TIME — เลือกค่ายเกมเพื่อดูอัตราชนะ', contents: bubble }];
+  const bubbles = pages.map((slice, idx) => makeBubble(slice, idx));
+  const contents = bubbles.length <= 1 ? (bubbles[0] || {}) : { type: 'carousel', contents: bubbles };
+  return [{ type: 'flex', altText: '⚡ BONUS TIME — เลือกค่ายเกมเพื่อดูอัตราชนะ', contents }];
 }
 
 // ─── LINE Flex: การ์ดเกมในค่าย (carousel) ────────────────────────────────────
