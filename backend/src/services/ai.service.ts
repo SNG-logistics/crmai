@@ -474,3 +474,70 @@ export async function composeQuickReply(opts: {
     return content; // AI ล่ม → คืนเนื้อหาดิบให้แอดมินแก้เอง
   }
 }
+
+
+// ─── Vision Assist — อ่านรูปที่ลูกค้าส่ง แล้วช่วยแก้ปัญหา (กรณีไม่ใช่สลิป) ──────────
+//  ลูกค้าส่งรูปมา: ถ้าเป็นสลิปโอนเงิน → คืน isSlip=true (ให้ระบบตรวจสลิปจัดการเอง)
+//  ถ้าไม่ใช่สลิป (จอ error, เข้าเกมไม่ได้, ภาพหน้าจอปัญหา ฯลฯ) → เข้าใจปัญหาแล้วตอบช่วยเหลือ
+export async function visionAssistReply(opts: {
+  tenantId: string;
+  companyId?: string | null;
+  imageBase64: string; // data URL เช่น data:image/jpeg;base64,xxxx
+  conversationHistory?: { role: 'user' | 'assistant'; content: string }[];
+  lastCustomerText?: string;
+}): Promise<{ isSlip: boolean; reply: string }> {
+  const { tenantId, companyId, imageBase64, conversationHistory = [], lastCustomerText } = opts;
+
+  const botConfig = await prisma.botConfig.findFirst({
+    where: companyId ? { companyId } : { tenantId },
+    include: { knowledgeBase: { where: { isActive: true }, take: 30 } },
+  });
+
+  const basePrompt = botConfig?.systemPrompt ||
+    'คุณเป็น AI Assistant ผู้ช่วยลูกค้า เป็นมิตร สุภาพ และช่วยแก้ปัญหาให้ลูกค้าได้';
+  const settings = parseBotSettings(botConfig?.metadata);
+  const rules = buildSystemRules(settings);
+  const businessContext = settings.businessInfo
+    ? `\n\n—— ข้อมูลธุรกิจ (ข้อเท็จจริง ใช้ตอบลูกค้า ห้ามแต่งเพิ่ม) ——\n${settings.businessInfo}`
+    : `\n${PROMOTION_INFO}`;
+  const kb = botConfig?.knowledgeBase || [];
+  const kbText = kb.length
+    ? `\n\n—— FAQ ——\n${kb.map(k => `Q: ${k.question}\nA: ${k.answer}`).join('\n')}`
+    : '';
+
+  const systemPrompt = `${basePrompt}\n\n${rules}${businessContext}${kbText}
+
+หน้าที่ตอนนี้ (สำคัญ): ลูกค้าส่ง "รูปภาพ" มา ให้ดูรูปแล้วทำดังนี้
+1) ถ้าเป็น "สลิปโอนเงิน/หลักฐานการโอน" → ตอบ JSON {"isSlip":true,"reply":""} เท่านั้น (มีระบบตรวจสลิปแยกอยู่แล้ว)
+2) ถ้าไม่ใช่สลิป → ดูว่าลูกค้าติดปัญหาอะไรจากรูป (เช่น จอ error, เข้าเกม/เข้าเว็บไม่ได้, ลืมรหัส, หน้าฝากถอนมีปัญหา, ภาพยูสเซอร์ ฯลฯ) แล้วช่วยแก้ให้ตรงจุดที่สุด ตอบภาษาไทยสุภาพ กระชับ ตามกฎด้านบน
+   - เรื่องฝาก/ถอน/เครดิต → ให้แจ้งลูกค้าว่า "รบกวนแจ้งยูสเซอร์ ให้แอดมินตรวจสอบจากหน้าระบบหน่อยนะคะ🥰"
+   - ห้ามแต่งข้อมูล/ตัวเลข/โปรที่ไม่มีในข้อมูลธุรกิจ/FAQ
+   ตอบ JSON: {"isSlip":false,"reply":"ข้อความช่วยเหลือลูกค้า"}
+ตอบ JSON อย่างเดียว ห้ามมี markdown`;
+
+  const userContent: any[] = [];
+  if (lastCustomerText) userContent.push({ type: 'text', text: `ข้อความจากลูกค้า: "${lastCustomerText}"` });
+  userContent.push({ type: 'text', text: 'นี่คือรูปที่ลูกค้าส่งมา วิเคราะห์แล้วตอบ JSON ตามรูปแบบ' });
+  userContent.push({ type: 'image_url', image_url: { url: imageBase64 } });
+
+  try {
+    const resp = await client.chat.completions.create({
+      model: botConfig?.model || DEFAULT_MODEL,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...conversationHistory.slice(-4),
+        { role: 'user', content: userContent as any },
+      ],
+      temperature: 0.4,
+      max_tokens: 350,
+      response_format: { type: 'json_object' },
+    });
+    const raw = (resp.choices[0]?.message?.content || '{}')
+      .replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+    const parsed = JSON.parse(raw);
+    return { isSlip: !!parsed.isSlip, reply: (parsed.reply || '').toString().trim() };
+  } catch (e: any) {
+    console.warn('[AI] visionAssistReply failed:', e?.response?.status, e?.message);
+    return { isSlip: false, reply: '' };
+  }
+}

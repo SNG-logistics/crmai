@@ -808,7 +808,7 @@ export default function InboxPage() {
                     {activeConv.isBot ? '🤖 Bot' : '👤 Human'}
                   </span>
                   <label className="toggle" style={{ transform: 'scale(0.85)' }}>
-                    <input type="checkbox" checked={false} disabled title="Bot mode is always enabled" />
+                    <input type="checkbox" checked={!activeConv.isBot} onChange={toggleBot} title="สลับ AI ↔ คนตอบ" />
                     <span className="toggle-slider" />
                   </label>
                 </div>
@@ -1041,10 +1041,9 @@ export default function InboxPage() {
                     ref={textareaRef}
                     className="input"
                     rows={2}
-                    placeholder={activeConv.isBot ? '' : 'พิมพ์ข้อความ... (Enter ส่ง, Shift+Enter ขึ้นบรรทัด, / สำหรับ Quick Reply)'}
+                    placeholder={'พิมพ์ข้อความ... (Enter ส่ง, Shift+Enter ขึ้นบรรทัด, / สำหรับ Quick Reply)'}
                     value={newMsg}
                     onChange={e => handleTyping(e.target.value)}
-                    disabled={activeConv.isBot}
                     onKeyDown={e => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
@@ -1063,16 +1062,16 @@ export default function InboxPage() {
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <button className="btn btn-ghost btn-sm btn-icon" disabled={activeConv.isBot}
-                    title="⚡ Key ลัด — AI แต่งคำตอบจากที่ตั้งไว้"
+                  <button className="btn btn-ghost btn-sm btn-icon"
+                    title="⚡ Key ลัด — คำตอบที่ตั้งไว้"
                     onClick={() => { setCannedFilter('/'); setShowCanned(v => !v); textareaRef.current?.focus(); }}>
                     ⚡
                   </button>
-                  <button className="btn btn-ghost btn-sm btn-icon" onClick={getAISuggestion} disabled={loadingAI || activeConv.isBot} title="AI แนะนำ">
+                  <button className="btn btn-ghost btn-sm btn-icon" onClick={getAISuggestion} disabled={loadingAI} title="AI แนะนำ">
                     {loadingAI ? <span className="spinner" style={{ width: 14, height: 14 }} /> : '✨'}
                   </button>
                   <button className="btn btn-primary btn-sm" onClick={sendMessage}
-                    disabled={sending || !newMsg.trim() || activeConv.isBot}
+                    disabled={sending || !newMsg.trim()}
                     style={{ padding: '8px 16px', borderRadius: 10 }}>
                     {sending ? <span className="spinner" style={{ width: 14, height: 14 }} /> : '📤'}
                   </button>

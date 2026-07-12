@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../../lib/prisma';
 import { verifyLineSignature, parseLineEvent, getLineProfile, sendLineReply, sendLinePush, lineTextMessage, lineBotReplyMessage, lineWelcomeMessage } from '../../services/line.service';
-import { processBotMessage, generateAIResponse } from '../../services/ai.service';
+import { processBotMessage, generateAIResponse, visionAssistReply } from '../../services/ai.service';
 import { checkRepeatAbuse, REPEAT_HANDOFF_REPLY } from '../../services/bot-guard';
 import { emitToTenant } from '../../lib/socket';
 import { verifySlip } from '../../services/slip-verify.service';
@@ -1109,8 +1109,33 @@ async function verifySlipFromLine(opts: {
     } else if (result.status === 'fake') {
       // ❌ สลิปปลอม / ผิดปกติ
       customerMsg = `⚠️ สลิปนี้ไม่ผ่านการตรวจสอบค่ะ กรุณาส่งสลิปจริงจากแอปธนาคารนะคะ 🙏`;
+    } else if (result.status === 'not_slip') {
+      // 🖼️ ลูกค้าส่งรูปที่ "ไม่ใช่สลิป" → ให้ AI ดูรูปแล้วช่วยแก้ปัญหาให้ตรงจุด
+      try {
+        const imgPath = (result as any).imagePath || result.record?.imagePath;
+        if (imgPath) {
+          const fsMod = (await import('fs')).default;
+          if (fsMod.existsSync(imgPath)) {
+            const buf = fsMod.readFileSync(imgPath);
+            const base64 = `data:image/jpeg;base64,${buf.toString('base64')}`;
+            const convRow = await prisma.conversation.findUnique({ where: { id: conversationId }, select: { companyId: true } });
+            const recent = await prisma.message.findMany({ where: { conversationId }, orderBy: { createdAt: 'asc' }, take: 10 });
+            const history = recent
+              .filter((m: any) => m.type === 'text' && m.content)
+              .map((m: any) => ({ role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const, content: m.content }));
+            const lastText = [...recent].reverse().find((m: any) => m.senderType === 'customer' && m.type === 'text')?.content || '';
+            const assist = await visionAssistReply({
+              tenantId, companyId: convRow?.companyId,
+              imageBase64: base64, conversationHistory: history, lastCustomerText: lastText,
+            });
+            if (!assist.isSlip && assist.reply) customerMsg = assist.reply;
+          }
+        }
+      } catch (e: any) {
+        console.warn('[SlipVerify] vision assist failed:', e.message);
+      }
     }
-    // not_slip และ error → ไม่ตอบลูกค้า (รูปทั่วไปหรือระบบมีปัญหา → เงียบ)
+    // error → ไม่ตอบลูกค้า (ระบบมีปัญหา → เงียบ)
 
     // ── ส่งข้อความกลับลูกค้า (เฉพาะกรณีที่มี customerMsg) ──────────────────
     if (customerMsg) {
@@ -1133,7 +1158,7 @@ async function verifySlipFromLine(opts: {
 
     // ── บันทึกผลลง DB และ Emit ไปยัง admin inbox ───────────────────────────
     const adminNote = result.status === 'not_slip'
-      ? `🖼️ ลูกค้าส่งรูปทั่วไป (ไม่ใช่สลิป) — บอทไม่ตอบ`
+      ? (customerMsg || `🖼️ ลูกค้าส่งรูปทั่วไป (ไม่ใช่สลิป) — AI ไม่สามารถช่วยได้`)
       : result.message;
 
     const resultMsg = await prisma.message.create({

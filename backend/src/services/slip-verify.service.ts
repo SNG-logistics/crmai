@@ -263,6 +263,7 @@ interface VerifySlipResult {
   transRef?: string;
   message: string; // message to send to customer
   record?: any; // saved DB record
+  imagePath?: string; // ที่อยู่ไฟล์รูปที่ดาวน์โหลดไว้ (ใช้ต่อกับ AI Vision กรณีไม่ใช่สลิป)
 }
 
 export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipResult> {
@@ -412,9 +413,10 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
   });
 
   return {
-    status: status === 'not_slip' ? 'fake' : status,
+    status, // ⚠️ คงค่า not_slip ไว้ (เดิม map เป็น 'fake' → รูปทั่วไปถูกตอบว่า "สลิปไม่ผ่าน")
     verifiedBy, amount: finalAmount,
     bankFrom: finalBankFrom, bankTo: finalBankTo,
     transRef: finalTransRef, message, record,
+    imagePath: filePath,
   };
 }
