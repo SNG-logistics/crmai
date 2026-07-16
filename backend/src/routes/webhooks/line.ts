@@ -761,15 +761,16 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     return;
   }
 
-  // ✅ BONUS TIME fast-path: ลูกค้าพิมพ์คีย์เวิร์ดตรงๆ → โชว์เมนูค่ายเกมทันที
-  if (btConfig && matchBonusTimeKeyword(normalized.content, btConfig)) {
+  // ✅ BONUS TIME fast-path: ลูกค้าพิมพ์ bonustime หรือ "ถามหาเกมแตก/เกมไหนดี" → โชว์การ์ด BONUS TIME ทันที
+  //    (แทนที่ลิสต์ข้อความแนะนำเกมแบบเดิม — ตอนนี้เกมแตกทุกแบบเด้งเป็นกล่อง BONUS TIME)
+  if (btConfig && (matchBonusTimeKeyword(normalized.content, btConfig) || isHotGamesQuery(normalized.content))) {
     const ctx: BonusCtx = {
       tenantId, conversation, contact, userId,
       replyToken: normalized.replyToken || null, accessToken, config: btConfig,
     };
     const ok = await sendBonusMenu(ctx);
     if (ok) {
-      console.log(`[BonusTime] ⚡ keyword trigger → menu conv=${conversation.id}`);
+      console.log(`[BonusTime] ⚡ keyword/hot-games trigger → menu conv=${conversation.id}`);
       return;
     }
     // ยังไม่มีค่าย/ส่ง Flex ไม่ผ่าน → ห้ามเงียบ! ตอบ text แจ้งลูกค้าแล้วจบ
@@ -796,9 +797,10 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     return;
   }
 
-  // ✅ ตรวจสอบ: ถามว่าเกมไหนแตก → สุ่มแนะนำเกมตามช่วงเวลา
+  // ✅ ถามหาเกมแตก/เกมไหนดี แต่ระบบ BONUS TIME ยังไม่พร้อม (btConfig ว่าง)
+  //    ⚠️ ห้ามส่งลิสต์แนะนำเกมแบบเดิมเด็ดขาด (ลูกค้าไม่ต้องการ) — ตอบสั้นๆ ให้พิมพ์ BONUSTIME
   if (isHotGamesQuery(normalized.content)) {
-    const reply = await getHotGamesReply(conversation.id);
+    const reply = 'ดูอัตราชนะเกมแต่ละค่ายแบบเรียลไทม์ได้เลยค่ะ พิมพ์ว่า "BONUSTIME" มาได้เลยนะคะ ✨';
     try {
       if (normalized.replyToken) {
         await sendLineReply(normalized.replyToken, [lineTextMessage(reply)], accessToken);
@@ -814,7 +816,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
         contact, channel: 'line',
       });
     } catch (e: any) {
-      console.warn(`[LINE Bot] hot-games reply failed:`, e.message);
+      console.warn(`[LINE Bot] hot-games fallback failed:`, e.message);
     }
     return; // บอทตอบเอง ไม่ handoff
   }
