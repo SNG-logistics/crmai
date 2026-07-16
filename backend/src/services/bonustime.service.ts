@@ -164,6 +164,12 @@ export function buildBonusTimeMenuMessages(config: BTConfig, camps: BTCamp[]): a
   const pages = chunks.slice(0, MAX_BUBBLES);
   const totalPages = pages.length || 1;
 
+  // ⚠️ กัน text ว่าง — LINE ปฏิเสธทั้งการ์ดถ้ามี text component ที่ว่างเปล่า (เช่นแอดมินเคลียร์ intro)
+  const titleTxt = (config.headerTitle || '').trim() || '⚡ BONUS TIME ⚡';
+  const introTxt = (config.intro || '').trim();
+  const subTxt = (config.headerSubtitle || '').trim();
+  const footerTxt = (config.footerNote || '').trim();
+
   const makeBubble = (slice: BTCamp[], pageIdx: number): any => {
     const rows: any[] = [];
     for (let i = 0; i < slice.length; i += PER_ROW) {
@@ -173,31 +179,40 @@ export function buildBonusTimeMenuMessages(config: BTConfig, camps: BTCamp[]): a
     }
     const liveText = totalPages > 1 ? `🟢 LIVE • หน้า ${pageIdx + 1}/${totalPages}` : '🟢 LIVE • อัปเดตเรียลไทม์';
     const bodyContents: any[] = [];
-    if (pageIdx === 0) bodyContents.push({ type: 'text', text: config.intro, size: 'sm', color: GOLD_SOFT, wrap: true });
+    if (pageIdx === 0 && introTxt) bodyContents.push({ type: 'text', text: introTxt, size: 'sm', color: GOLD_SOFT, wrap: true });
     bodyContents.push(...rows);
-    return {
+
+    // header — ใส่เฉพาะ text ที่ไม่ว่าง
+    const headerContents: any[] = [
+      { type: 'text', text: titleTxt, weight: 'bold', size: 'xl', color: GOLD_BRIGHT, align: 'center', wrap: true },
+    ];
+    if (subTxt) headerContents.push({ type: 'text', text: subTxt, size: 'xxs', color: GOLD_DIM, align: 'center', wrap: true });
+    headerContents.push({
+      type: 'box', layout: 'baseline', margin: 'md', justifyContent: 'center', spacing: 'sm',
+      contents: [{ type: 'text', text: liveText, size: 'xs', color: '#10B981', weight: 'bold', align: 'center' }],
+    });
+
+    const bubble: any = {
       type: 'bubble', size: 'mega',
       header: {
         type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '16px', spacing: 'xs',
-        contents: [
-          { type: 'text', text: config.headerTitle, weight: 'bold', size: 'xl', color: GOLD_BRIGHT, align: 'center', wrap: true },
-          { type: 'text', text: config.headerSubtitle, size: 'xxs', color: GOLD_DIM, align: 'center', wrap: true },
-          {
-            type: 'box', layout: 'baseline', margin: 'md', justifyContent: 'center', spacing: 'sm',
-            contents: [{ type: 'text', text: liveText, size: 'xs', color: '#10B981', weight: 'bold', align: 'center' }],
-          },
-        ],
+        contents: headerContents,
       },
       body: {
         type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '12px', spacing: 'sm',
         contents: bodyContents,
       },
-      footer: {
-        type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '10px',
-        contents: [{ type: 'text', text: config.footerNote, size: 'xxs', color: GOLD_DIM, wrap: true, align: 'center' }],
-      },
-      styles: { header: { separator: true, separatorColor: GOLD_LINE }, footer: { separator: true, separatorColor: GOLD_LINE } },
+      styles: { header: { separator: true, separatorColor: GOLD_LINE } },
     };
+    // footer — ใส่เฉพาะเมื่อมีข้อความ (ว่าง = ไม่ใส่ footer เลย)
+    if (footerTxt) {
+      bubble.footer = {
+        type: 'box', layout: 'vertical', backgroundColor: LUX_DARK, paddingAll: '10px',
+        contents: [{ type: 'text', text: footerTxt, size: 'xxs', color: GOLD_DIM, wrap: true, align: 'center' }],
+      };
+      bubble.styles.footer = { separator: true, separatorColor: GOLD_LINE };
+    }
+    return bubble;
   };
 
   const bubbles = pages.map((slice, idx) => makeBubble(slice, idx));
@@ -231,9 +246,9 @@ function gameBubble(config: BTConfig, game: BTGame): any {
   // แถวหัวการ์ด: ไอคอนเกม (ซ้าย) + ชื่อเกม/ค่าย (ขวา)
   const titleCol: any = {
     type: 'box', layout: 'vertical', spacing: 'none', justifyContent: 'center',
-    contents: [{ type: 'text', text: game.name, weight: 'bold', size: 'lg', color: GOLD_SOFT, wrap: true, maxLines: 2 }],
+    contents: [{ type: 'text', text: (game.name || '').trim() || 'เกม', weight: 'bold', size: 'lg', color: GOLD_SOFT, wrap: true, maxLines: 2 }],
   };
-  if (game.provider) titleCol.contents.push({ type: 'text', text: String(game.provider), size: 'xs', color: GOLD_DIM });
+  if (game.provider && String(game.provider).trim()) titleCol.contents.push({ type: 'text', text: String(game.provider).trim(), size: 'xs', color: GOLD_DIM });
   const titleRow: any = { type: 'box', layout: 'horizontal', spacing: 'md', alignItems: 'center', contents: [] };
   const iconUrl = flexImg(game.image) || flexImg(game.banner);
   if (iconUrl) {
