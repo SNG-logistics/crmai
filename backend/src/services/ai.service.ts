@@ -256,6 +256,75 @@ export async function aiSelfTest(): Promise<void> {
   }
 }
 
+// ─── AI Learning — เรียนรู้จากแชทที่แอดมิน (คน) เคยตอบ ────────────────────────
+//  แนวคิด: ดึงคู่ "คำถามลูกค้า → คำตอบของแอดมิน (senderType=agent)" ทั้ง tenant
+//  มาเก็บ cache แล้วเวลาลูกค้าถามใหม่ ให้หาคู่ที่ "คล้ายที่สุด" ยัดเข้า prompt เป็นตัวอย่าง
+//  → บอทตอบเหมือนทีมแอดมินตอบจริง และเก่งขึ้นเรื่อยๆ เมื่อมีแชทมากขึ้น (ไม่ทำ KB เพี้ยน)
+type QAPair = { q: string; a: string };
+const learnedCache = new Map<string, { at: number; pairs: QAPair[] }>();
+const LEARN_TTL = 5 * 60 * 1000; // รีเฟรชทุก 5 นาที
+
+async function loadAgentQAPairs(tenantId: string): Promise<QAPair[]> {
+  const cached = learnedCache.get(tenantId);
+  if (cached && Date.now() - cached.at < LEARN_TTL) return cached.pairs;
+  try {
+    // ดึงข้อความล่าสุดของ tenant (customer + agent เท่านั้น) แล้วจับคู่ในโค้ด
+    const rows = await prisma.message.findMany({
+      where: { tenantId, type: 'text', senderType: { in: ['customer', 'agent'] } },
+      orderBy: { createdAt: 'desc' },
+      take: 1200,
+      select: { conversationId: true, senderType: true, content: true, createdAt: true },
+    });
+    // เรียงจากเก่า→ใหม่ ต่อ conversation แล้วจับคู่ customer → agent ที่ตอบถัดมา
+    const byConv = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const arr = byConv.get(r.conversationId) || [];
+      arr.push(r); byConv.set(r.conversationId, arr);
+    }
+    const pairs: QAPair[] = [];
+    for (const arr of byConv.values()) {
+      arr.sort((a, b) => +a.createdAt - +b.createdAt);
+      for (let i = 0; i < arr.length - 1; i++) {
+        if (arr[i].senderType === 'customer' && arr[i + 1].senderType === 'agent') {
+          const q = (arr[i].content || '').trim();
+          const a = (arr[i + 1].content || '').trim();
+          // กรอง noise: คำถาม/คำตอบสั้นเกิน หรือเป็นข้อความระบบ
+          if (q.length >= 3 && a.length >= 3 && a.length <= 400 && !a.startsWith('[') && !/^https?:\/\/\S+$/.test(a)) {
+            pairs.push({ q, a });
+          }
+        }
+      }
+    }
+    // เก็บล่าสุดสูงสุด 400 คู่ (พอสำหรับ match, ไม่กินแรม)
+    const trimmed = pairs.slice(-400);
+    learnedCache.set(tenantId, { at: Date.now(), pairs: trimmed });
+    return trimmed;
+  } catch (e: any) {
+    logAI(`loadAgentQAPairs failed: ${e?.message}`);
+    return [];
+  }
+}
+
+// หา Q&A ของแอดมินที่ "คล้ายคำถามลูกค้าตอนนี้ที่สุด" (ใช้ bigram เดียวกับ KB)
+async function getLearnedExamples(tenantId: string, userMessage: string, limit = 3): Promise<QAPair[]> {
+  const pairs = await loadAgentQAPairs(tenantId);
+  if (!pairs.length) return [];
+  const umBg = charBigrams(userMessage);
+  const scored = pairs
+    .map(p => ({ p, s: bigramOverlap(umBg, charBigrams(p.q)) }))
+    .filter(x => x.s >= 0.45)     // เอาเฉพาะที่คล้ายจริงๆ
+    .sort((a, b) => b.s - a.s);
+  // ตัดคำตอบซ้ำ (แอดมินตอบเหมือนกันหลายครั้ง)
+  const seen = new Set<string>(); const out: QAPair[] = [];
+  for (const x of scored) {
+    const key = x.p.a.slice(0, 40);
+    if (seen.has(key)) continue;
+    seen.add(key); out.push(x.p);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
 // ─── Bot Message Processor v2 ─────────────────────────────────────────────────
 export async function processBotMessage(
   tenantId: string,
@@ -299,6 +368,12 @@ export async function processBotMessage(
     ? `\n\n—— FAQ ที่เกี่ยวข้อง (เรียงจากตรงที่สุด — ใช้ตอบก่อนเสมอ) ——\n${relevantKb.map((kb, i) => `${i + 1}. Q: ${kb.question}\n   A: ${kb.answer}`).join('\n')}\n\n⚠️ ถ้าคำถามลูกค้าตรงกับ FAQ ข้อใด ให้ตอบตามคำตอบของ FAQ ข้อนั้นเป็นหลัก และตอบให้ตรงกับสิ่งที่ลูกค้าถามจริงๆ ห้ามตอบนอกเรื่อง`
     : '';
 
+  // ─ AI Learning: ตัวอย่างที่ "แอดมินคนจริง" เคยตอบคำถามคล้ายๆ นี้ ─
+  const examples = await getLearnedExamples(tenantId, userMessage, 3);
+  const learnedContext = examples.length > 0
+    ? `\n\n—— ตัวอย่างที่แอดมิน (คนจริง) เคยตอบคำถามคล้ายๆ นี้ (เลียนแบบวิธีตอบ/โทน/ความตรงประเด็น) ——\n${examples.map((e, i) => `${i + 1}. ลูกค้าถาม: ${e.q}\n   แอดมินตอบ: ${e.a}`).join('\n')}\n\n⚠️ ใช้ตัวอย่างพวกนี้เป็นแนวทางตอบให้ "ตรงจุดเหมือนแอดมินตอบ" แต่ห้ามลอกข้อมูล/ตัวเลขที่ไม่เกี่ยวกับคำถามปัจจุบัน`
+    : '';
+
   // ─ Contact context ─
   const contactInfo = contactContext?.displayName
     ? `\n—— ข้อมูลลูกค้า ——\nชื่อ: ${contactContext.displayName} | ประเภท: ${contactContext.memberType || 'ใหม่'} | รวมฝาก ${contactContext.totalDeposit || 0} บาท`
@@ -329,7 +404,7 @@ BONUSTIME / โบนัสไทม์ / อัตราชนะเกม / wi
     ? `\n- เรื่องสมัครสมาชิก/ขอข้อมูล: ขอเฉพาะข้อมูลที่ยังขาดจากรายการ (ชื่อ-นามสกุล, เบอร์โทร, ธนาคาร, เลขบัญชี) เท่านั้น ห้ามขอทั้งชุดซ้ำ`
     : `\n- เรื่องสมัครสมาชิก/register/เปิดบัญชี: ให้ตอบข้อความนี้: "🖌รบกวนลูกค้าแจ้งข้อมูลดังนี้นะคะ🖌\n✅ชื่อ - นามสกุล :\n✅เบอร์โทรศัพท์ที่ใช้สมัครสมาชิก :\n✅ธนาคาร :\n✅เลขบัญชีธนาคาร :\n\nรบกวนคุณลูกค้าพิมพ์ข้อมูลเป็นตัวอักษรให้กับทางทีมงานนะคะ"`;
 
-  const systemPrompt = `${basePrompt}${kbContext}${contactInfo}${profileContext}\n\n${rules}${registrationRule}${businessContext}${bonusTimeInstr}`;
+  const systemPrompt = `${basePrompt}${kbContext}${learnedContext}${contactInfo}${profileContext}\n\n${rules}${registrationRule}${businessContext}${bonusTimeInstr}`;
 
   const msgs: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
     { role: 'system', content: systemPrompt },
