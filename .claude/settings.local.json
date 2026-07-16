@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__claude-in-chrome__computer",
+      "mcp__claude-in-chrome__browser_batch",
+      "mcp__claude-in-chrome__read_page",
+      "mcp__claude-in-chrome__find",
+      "PowerShell(nslookup khodtuengai.com 8.8.8.8)",
+      "PowerShell(nslookup www.khodtuengai.com 8.8.8.8)",
+      "mcp__claude-in-chrome__navigate",
+      "PowerShell(git fetch origin)",
+      "PowerShell(git add deploy/Caddyfile)",
+      "PowerShell(git push origin main)",
+      "PowerShell(git config credential.helper)",
+      "PowerShell(gh auth status)",
+      "PowerShell($root='C:\\\\Users\\\\Admin\\\\Desktop\\\\CRM'; Test-Path \"$root\\\\backend\\\\.env\"; Test-Path \"$root\\\\frontend\\\\.env.local\"; Test-Path \"$root\\\\modules\\\\lufy\\\\backend\\\\.env\"; Test-Path \"$root\\\\modules\\\\lufy\\\\frontend\\\\.env.local\"; if \\(Test-Path \"$root\\\\backend\\\\prisma\\\\dev.db\"\\) { '{0:N1} MB dev.db' -f \\(\\(Get-Item \"$root\\\\backend\\\\prisma\\\\dev.db\"\\).Length/1MB\\) }; if \\(Test-Path \"$root\\\\backend\\\\uploads\"\\) { '{0:N1} MB uploads' -f \\(\\(Get-ChildItem \"$root\\\\backend\\\\uploads\" -Recurse -File | Measure-Object Length -Sum\\).Sum/1MB\\) }; '{0:N1} MB git' -f \\(\\(Get-ChildItem \"$root\\\\.git\" -Recurse -File | Measure-Object Length -Sum\\).Sum/1MB\\))",
+      "PowerShell($rng=[Security.Cryptography.RNGCryptoServiceProvider]::new\\(\\); 1..3 | ForEach-Object { $b=New-Object byte[] 48; $rng.GetBytes\\($b\\); \\($b|ForEach-Object{$_.ToString\\('x2'\\)}\\) -join '' })",
+      "PowerShell($s='C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Admin-Desktop-CRM\\\\0d429b86-dec4-46b3-a6af-6d7770bfd468\\\\scratchpad\\\\crm-stage'; Remove-Item \"$s\\\\backend\\\\.env\",\"$s\\\\frontend\\\\.env.local\",\"$s\\\\modules\\\\lufy\\\\backend\\\\.env\",\"$s\\\\modules\\\\lufy\\\\frontend\\\\.env.local\" -Force -Confirm:$false)",
+      "PowerShell(Set-Clipboard -Path 'C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Admin-Desktop-CRM\\\\0d429b86-dec4-46b3-a6af-6d7770bfd468\\\\scratchpad\\\\crm-code.zip')",
+      "PowerShell('clipboard set')",
+      "PowerShell(if\\(Test-Path \"$env:USERPROFILE\\\\.npmrc\"\\){Get-Content \"$env:USERPROFILE\\\\.npmrc\"}else{'no user .npmrc'}; if\\(Test-Path 'C:\\\\Users\\\\Admin\\\\Desktop\\\\CRM\\\\frontend\\\\.npmrc'\\){Get-Content 'C:\\\\Users\\\\Admin\\\\Desktop\\\\CRM\\\\frontend\\\\.npmrc'}else{'no frontend .npmrc'}; node -v; npm -v)",
+      "PowerShell('https://khodtuengai.com','https://www.khodtuengai.com','https://link.khodtuengai.com' | ForEach-Object { try { $r=Invoke-WebRequest $_ -UseBasicParsing -TimeoutSec 30; \"$_ -> $\\($r.StatusCode\\) \\($\\([math]::Round\\($r.RawContentLength/1KB,1\\)\\) KB\\)\" } catch { \"$_ -> $\\($_.Exception.Message\\)\" } })",
+      "PowerShell($zip='C:\\\\Users\\\\Admin\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-Admin-Desktop-CRM\\\\0d429b86-dec4-46b3-a6af-6d7770bfd468\\\\scratchpad\\\\crm-uploads.zip'; Compress-Archive -Path 'C:\\\\Users\\\\Admin\\\\Desktop\\\\CRM\\\\backend\\\\uploads' -DestinationPath $zip -CompressionLevel Fastest -Force; '{0:N1} MB' -f \\(\\(Get-Item $zip\\).Length/1MB\\); Set-Clipboard -Path $zip; 'on clipboard')",
+      "PowerShell(\\(Get-ChildItem 'C:\\\\Users\\\\Admin\\\\Desktop\\\\CRM\\\\backend\\\\uploads' -Recurse -File | Measure-Object\\).Count)",
+      "PowerShell(cd C:\\\\Users\\\\Admin\\\\Desktop\\\\CRM; git config --show-origin --get-all credential.helper; '---'; git config --show-origin --get-all http.extraheader 2>$null; '---'; Test-Path \"$env:USERPROFILE\\\\.git-credentials\"; '---'; Get-ChildItem env: | Where-Object { $_.Name -match 'GIT|GITHUB|GH_' } | Format-Table Name,Value -AutoSize)",
+      "PowerShell(git credential-manager github list)",
+      "PowerShell('---exit:' + $LASTEXITCODE)",
+      "PowerShell(Get-ChildItem env: | Where-Object { $_.Name -match 'PROXY|SANDBOX' } | Format-Table Name,Value -AutoSize; '---'; \\(Get-Command git\\).Source; '---'; git config --list --show-origin | Select-String -Pattern 'insteadof|proxy|credential')",
+      "Bash(npx prisma *)"
+    ]
+  }
+}

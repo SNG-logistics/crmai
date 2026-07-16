@@ -123,6 +123,7 @@ export default function LoginPage() {
 
           {/* Google sign-in */}
           <button
+            suppressHydrationWarning
             type="button"
             onClick={handleGoogleLogin}
             disabled={googleLoading || loading}

@@ -82,6 +82,121 @@ const CANNED = [
   { trigger: '/verify',  text: 'กรุณาส่งเอกสารยืนยันตัวตน (บัตรประชาชน + selfie) เพื่อยืนยันบัญชีนะคะ 📋', category: 'เกม' },
 ];
 
+// ─── Lao Lottery Parser ───────────────────────────────────────────────────────
+interface LaoLotteryResult {
+  raw: string; numbers: string[]; count: number;
+  service: string; round: string;
+  pricePerNumber: number; total: number;
+  readCode: string; readText: string;
+  grid: { number: string; readCode: string; priceText: string; service: string; round: string; totalText: string }[];
+}
+
+function parseLaoLottery(input: string): LaoLotteryResult | null {
+  const raw = input.trim();
+  // Pattern: "12 20 22 26=10 ล. ลาวพัด 20.24" or "12 20=10k ลาวพัด 20.24"
+  const match = raw.match(/^(.+?)\s*=\s*([\d.,]+)\s*([^\s]*)\s*(.*)$/);
+  if (!match) return null;
+
+  const numbers = (match[1].match(/\d{1,3}/g) || []).map(n => n.padStart(2, '0'));
+  if (numbers.length === 0) return null;
+
+  const unitText = match[3] || '';
+  const detailText = (match[4] || '').trim();
+  let pricePerNumber = Number(match[2].replace(/,/g, ''));
+  if (/[ลlLkK]/.test(unitText)) pricePerNumber *= 1000;
+  if (isNaN(pricePerNumber) || pricePerNumber <= 0) return null;
+
+  const roundMatch = detailText.match(/(\d{1,2}\.\d{1,2})/);
+  const round = roundMatch ? roundMatch[1] : '';
+  const service = detailText.replace(round, '').trim() || 'หวยลาว';
+  const total = numbers.length * pricePerNumber;
+  const readCode = 'l' + numbers.join('l') + 'l';
+
+  return {
+    raw, numbers, count: numbers.length, service, round,
+    pricePerNumber, total,
+    readCode,
+    readText: `${readCode} total ${total.toLocaleString()} kip`,
+    grid: numbers.map(num => ({
+      number: num,
+      readCode: `l${num}l`,
+      priceText: `${pricePerNumber.toLocaleString()} kip`,
+      service, round,
+      totalText: `${total.toLocaleString()} kip`,
+    })),
+  };
+}
+
+function LaoLotteryPreview({ result, onSend, onDismiss }: { result: LaoLotteryResult; onSend: (text: string) => void; onDismiss: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(result.readText).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1800); });
+  };
+  return (
+    <div style={{
+      margin: '0 0 10px 0', borderRadius: 12, overflow: 'hidden',
+      border: '1.5px solid rgba(168,85,247,0.35)',
+      background: 'linear-gradient(135deg,rgba(88,28,135,0.18),rgba(59,7,100,0.12))',
+      boxShadow: '0 4px 18px rgba(139,92,246,0.18)',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(139,92,246,0.18)', borderBottom: '1px solid rgba(168,85,247,0.2)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <span style={{ fontSize: '1rem' }}>🎰</span>
+          <span style={{ fontWeight: 800, fontSize: '.82rem', color: '#c4b5fd' }}>ຫວຍລາວ — ຮັບລາຍການ</span>
+          <span style={{ fontSize: '.68rem', color: '#a78bfa', background: 'rgba(167,139,250,0.15)', borderRadius: 5, padding: '1px 7px' }}>
+            {result.service} · ຮອບ {result.round}
+          </span>
+        </div>
+        <button onClick={onDismiss} style={{ background: 'none', border: 'none', color: '#a78bfa', cursor: 'pointer', fontSize: '1rem', lineHeight: 1, padding: '2px 5px' }}>✕</button>
+      </div>
+
+      {/* Grid table */}
+      <div style={{ overflowX: 'auto', padding: '10px 12px 4px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '.75rem' }}>
+          <thead>
+            <tr style={{ color: '#c4b5fd', fontWeight: 700, textAlign: 'left' }}>
+              {['ເລກ', 'ລະຫັດ', 'ລາຄາ/ເລກ', 'ປະເພດ', 'ຮອບ', 'ຍອດລວມ'].map(h => (
+                <th key={h} style={{ padding: '3px 8px 6px', borderBottom: '1px solid rgba(167,139,250,0.2)', whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {result.grid.map((row, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid rgba(167,139,250,0.08)' }}>
+                <td style={{ padding: '4px 8px', fontWeight: 900, color: '#f0abfc', fontSize: '.88rem' }}>{row.number}</td>
+                <td style={{ padding: '4px 8px', color: '#e9d5ff', fontFamily: 'monospace' }}>{row.readCode}</td>
+                <td style={{ padding: '4px 8px', color: '#d8b4fe' }}>{row.priceText}</td>
+                <td style={{ padding: '4px 8px', color: '#c4b5fd' }}>{row.service}</td>
+                <td style={{ padding: '4px 8px', color: '#c4b5fd' }}>{row.round}</td>
+                <td style={{ padding: '4px 8px', fontWeight: 800, color: '#fbbf24' }}>{row.totalText}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Summary + actions */}
+      <div style={{ padding: '8px 12px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, borderTop: '1px solid rgba(167,139,250,0.15)', marginTop: 4 }}>
+        <div style={{ fontFamily: 'monospace', fontSize: '.8rem', color: '#e9d5ff', background: 'rgba(139,92,246,0.15)', borderRadius: 7, padding: '4px 10px', letterSpacing: '.5px' }}>
+          {result.readText}
+        </div>
+        <div style={{ display: 'flex', gap: 7 }}>
+          <button onClick={copy} style={{
+            border: '1px solid rgba(167,139,250,0.4)', background: 'transparent', color: '#c4b5fd',
+            borderRadius: 7, padding: '5px 11px', fontSize: '.74rem', fontWeight: 700, cursor: 'pointer',
+          }}>{copied ? '✅ copied' : '📋 copy'}</button>
+          <button onClick={() => onSend(result.readText)} style={{
+            border: 'none', background: 'linear-gradient(135deg,#7c3aed,#a855f7)', color: '#fff',
+            borderRadius: 7, padding: '5px 14px', fontSize: '.74rem', fontWeight: 800, cursor: 'pointer',
+            boxShadow: '0 3px 10px rgba(139,92,246,0.4)',
+          }}>📤 ສ່ງຂໍ້ຄວາມນີ້</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Channel helpers (LINE / WhatsApp / Telegram) ────────────────────────────
 const channelColor = (ch?: string) => ch === 'line' ? '#00B900' : ch === 'whatsapp' ? '#25D366' : '#2AABEE';
 const channelLabel = (ch?: string) => ch === 'line' ? '🟢 LINE' : ch === 'whatsapp' ? '🟩 WhatsApp' : '🔵 Telegram';
@@ -323,6 +438,8 @@ export default function InboxPage() {
   // ─── Enchant (พิมพ์ลาว → แปลไทย + แนะนำ 3 โทน) ───────────────────────────────
   const [enchant, setEnchant] = useState<{ lang: string; thai: string; suggestions: { tone: string; text: string }[] } | null>(null);
   const [loadingEnchant, setLoadingEnchant] = useState(false);
+  // ─── Lao Lottery Parser ───────────────────────────────────────────────────
+  const [laoLottery, setLaoLottery] = useState<LaoLotteryResult | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [showCanned, setShowCanned] = useState(false);
@@ -550,7 +667,7 @@ export default function InboxPage() {
     if (!newMsg.trim() || !activeConv || sending) return;
     setSending(true);
     const content = newMsg;
-    setNewMsg(''); setAiSuggest(''); setShowCanned(false); setEnchant(null);
+    setNewMsg(''); setAiSuggest(''); setShowCanned(false); setEnchant(null); setLaoLottery(null);
     const toastId = toast.loading('กำลังส่ง...');
     try {
       await api.post(`/conversations/${activeConv.id}/messages`, { content });
@@ -569,8 +686,17 @@ export default function InboxPage() {
     if (val.startsWith('/')) {
       setShowCanned(true);
       setCannedFilter(val);
+      setLaoLottery(null);
     } else {
       setShowCanned(false);
+      // ─── Lao Lottery auto-detect ────────────────────────────────────────
+      // Pattern: digits + "=" + amount + unit (ล/k) + optional service + round
+      if (/\d.*=\s*[\d.,]+\s*[ลlLkK]/.test(val)) {
+        const parsed = parseLaoLottery(val);
+        setLaoLottery(parsed);
+      } else {
+        setLaoLottery(null);
+      }
     }
     getSocket()?.emit('typing', { conversationId: activeConv?.id });
   };
@@ -1035,7 +1161,22 @@ export default function InboxPage() {
                   </span>
                 </div>
               )}
+              {/* ── 🎰 Lao Lottery Preview — แสดงเมื่อ detect pattern หวยลาว ── */}
+              {laoLottery && !activeConv.isBot && (
+                <div style={{ padding: '0 16px 0' }}>
+                  <LaoLotteryPreview
+                    result={laoLottery}
+                    onSend={(text) => {
+                      setNewMsg(text);
+                      setLaoLottery(null);
+                      setTimeout(() => sendMessage(), 50);
+                    }}
+                    onDismiss={() => setLaoLottery(null)}
+                  />
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', padding: '12px 16px' }}>
+
                 <div style={{ flex: 1, position: 'relative' }}>
                   <textarea
                     ref={textareaRef}
