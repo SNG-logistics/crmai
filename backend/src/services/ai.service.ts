@@ -1,5 +1,27 @@
 import OpenAI from 'openai';
 import prisma from '../lib/prisma';
+import { matchBonusTimeKeyword } from './bonustime.service';
+
+// ─── Sanitize — แชท (LINE/Telegram/WhatsApp) ไม่รองรับ markdown ────────────────
+//  ปัญหาเดิม: AI ตอบ "[https://databet28.vip/](https://databet28.vip/)" → ลูกค้าเห็นลิงก์ซ้ำ 2 รอบ
+//  แก้: แปลง markdown link เหลือ URL เปล่าครั้งเดียว + ตัด **bold** / `code` / URL ซ้ำติดกัน
+export function sanitizeForChat(text: string): string {
+  let t = text || '';
+  // ![alt](url) และ [label](url) → เหลือ url อย่างเดียว
+  t = t.replace(/!?\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g, '$1');
+  // [label](ไม่ใช่ url) → เหลือ label
+  t = t.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1');
+  // ตัด markdown ตกแต่ง
+  t = t.replace(/\*\*([^*]+)\*\*/g, '$1')
+       .replace(/__([^_]+)__/g, '$1')
+       .replace(/`([^`]+)`/g, '$1')
+       .replace(/^#{1,6}\s+/gm, '');
+  // URL เดิมซ้ำติดกัน เช่น "url url" หรือ "url (url)" → เหลือครั้งเดียว
+  t = t.replace(/(https?:\/\/[^\s)\]]+)[\s]*[(\[]?\1\/?[)\]]?/g, '$1');
+  // ช่องว่างเกิน
+  t = t.replace(/[ \t]{3,}/g, ' ');
+  return t.trim();
+}
 
 const client = new OpenAI({
   apiKey: process.env.COMETAPI_KEY || '',
@@ -116,7 +138,7 @@ const SYSTEM_BASE = `กฎสำคัญ:
 - ⚠️ เรื่องสมัครสมาชิก/register/เปิดบัญชี: ให้ตอบข้อความนี้เป๊ะๆ เท่านั้น ห้ามเพิ่มหรือเปลี่ยนแปลงข้อความ: "🖌รบกวนลูกค้าแจ้งข้อมูลดังนี้นะคะ🖌\n✅ชื่อ - นามสกุล :\n✅เบอร์โทรศัพท์ที่ใช้สมัครสมาชิก :\n✅ธนาคาร :\n✅เลขบัญชีธนาคาร :\n\nรบกวนคุณลูกค้าพิมพ์ข้อมูลเป็นตัวอักษรให้กับทางทีมงานนะคะ"
 - ข้อมูลลูกค้าที่ได้รับเป็นแค่ข้อมูลภายใน ห้ามนำไปบอกลูกค้าโดยตรง
 ${PROMOTION_INFO}${LAO_LANGUAGE_RULES}`;
-const MAX_HISTORY = 6;
+const MAX_HISTORY = 10; // จำบริบทได้ยาวขึ้น — ลูกค้าถามต่อเนื่องแล้วบอทไม่ลืมเรื่องเดิม
 
 // ─── Bot Settings (เก็บใน BotConfig.metadata เป็น JSON) ───────────────────────
 export type BotSettings = {
@@ -168,6 +190,8 @@ function buildSystemRules(s: BotSettings): string {
     '- ข้อมูลภายใน (ยอดฝาก สถิติ) ห้ามบอกลูกค้าโดยตรง',
     '- ⚠️ ห้ามบอกลูกค้าว่า "ยังไม่ได้ฝาก" หรือพูดถึงตัวเลขยอดเงินของลูกค้า',
     '- ⚠️ ห้ามขอสลิปหรือหลักฐานการโอนซ้ำ',
+    '- ⚠️ ห้ามใช้ markdown ทุกชนิด (ห้าม [ข้อความ](ลิงก์), **, `, #) — แชทลูกค้าแสดงข้อความล้วนเท่านั้น',
+    '- ถ้าต้องส่งลิงก์ ให้วาง URL เปล่าๆ ครั้งเดียว เช่น https://example.com — ห้ามวงเล็บครอบ ห้ามพิมพ์ลิงก์เดิมซ้ำ',
     s.forbidden ? `- ข้อห้ามเพิ่มเติมจากร้าน: ${s.forbidden}` : '',
   ].filter(Boolean);
   return `กฎสำคัญ:\n${rules.join('\n')}`;
@@ -202,6 +226,12 @@ export async function processBotMessage(
   opts?: { bonusTimeActive?: boolean; profileContext?: string }
 ): Promise<{ reply: string; shouldHandoff: boolean }> {
 
+  // ⚡ BONUSTIME deterministic pre-check — ไม่ต้องพึ่งดวงของ LLM
+  //  ลูกค้าถามหา bonustime/winrate ตรงๆ → คืนโทเคนทันที (webhook จะส่งการ์ดค่ายเกมเอง)
+  if (opts?.bonusTimeActive && matchBonusTimeKeyword(userMessage, null)) {
+    return { reply: '[[BONUSTIME]]', shouldHandoff: false };
+  }
+
   // per-company AI: ถ้ามี companyId → โหลด config ของบริษัทนั้น ; ไม่มี → fallback ระดับ tenant
   const botConfig = await prisma.botConfig.findFirst({
     where: companyId ? { companyId } : { tenantId },
@@ -231,9 +261,12 @@ export async function processBotMessage(
 
   // ─ BONUS TIME: ให้ AI เรียกระบบเองด้วยโทเคนพิเศษ ─
   const bonusTimeInstr = opts?.bonusTimeActive
-    ? `\n\n—— ระบบ BONUS TIME (สำคัญ) ——
-ถ้าลูกค้าอยากดู "BONUSTIME" / อัตราชนะเกม / ค่ายไหนแตก / ค่ายไหนดี / เกมไหนน่าเล่น / ระบบวิเคราะห์ AI / winrate / เปอร์เซ็นต์เกม
-ให้ตอบกลับด้วยข้อความว่า [[BONUSTIME]] เพียงอย่างเดียวเท่านั้น ห้ามพิมพ์ข้อความอื่นปนมา (ระบบจะแสดงการ์ดค่ายเกมให้เอง)`
+    ? `\n\n—— ระบบ BONUS TIME (สำคัญมาก — ห้ามพลาด) ——
+ถ้าลูกค้าสื่อความหมายว่าอยากดู/ถามถึงอย่างใดอย่างหนึ่งต่อไปนี้ (สะกดผิดก็นับ):
+BONUSTIME / โบนัสไทม์ / อัตราชนะเกม / winrate / เปอร์เซ็นต์เกม / ค่ายไหนแตก / ค่ายไหนดี / เกมไหนน่าเล่น / เกมไหนแตกดี / ระบบวิเคราะห์ AI / ขอดูค่ายเกม / สูตรเกม
+→ ให้ตอบว่า [[BONUSTIME]] เพียงอย่างเดียวเท่านั้น ห้ามพิมพ์คำอื่นปน ห้ามอธิบายเพิ่ม (ระบบจะแสดงการ์ดค่ายเกมให้เอง)
+ตัวอย่าง: ลูกค้า "ขอดูโบนัสไทม์หน่อยค่ะ" → คุณตอบ "[[BONUSTIME]]"
+ตัวอย่าง: ลูกค้า "มีระบบดูเกมแตกมั้ย" → คุณตอบ "[[BONUSTIME]]"`
     : '';
 
   // ─ การตั้งค่าละเอียดของบอท (จากหน้า AI Bot) ─
@@ -264,12 +297,15 @@ export async function processBotMessage(
       msgs,
       botConfig?.model || LIGHT_MODEL,
       botConfig?.temperature ?? 0.7,
-      200
+      300
     );
 
-    const cleanReply = raw
-      .replace(/HANDOFF_REQUESTED/gi, '')
-      .trim() || 'ได้รับข้อความแล้วนะคะ สอบถามเพิ่มเติมได้เลยค่ะ 🙏';
+    // ตัดโทเคนระบบ + ล้าง markdown/ลิงก์ซ้ำ ก่อนส่งเข้าแชท
+    const isBonusToken = /\[\[BONUSTIME\]\]/i.test(raw);
+    const cleanReply = isBonusToken
+      ? '[[BONUSTIME]]'
+      : sanitizeForChat(raw.replace(/HANDOFF_REQUESTED/gi, ''))
+        || 'ได้รับข้อความแล้วนะคะ สอบถามเพิ่มเติมได้เลยค่ะ 🙏';
     const shouldHandoff = checkHandoff(userMessage, raw, settings.handoffKeywords);
 
     return { reply: cleanReply || 'ได้รับข้อความแล้วนะคะ 🙏', shouldHandoff };

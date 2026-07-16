@@ -20,12 +20,22 @@ const router = Router();
 // ════════════════════════════════════════════════════════════════════════════
 
 // โหลด config ของบริษัท — คืน null ถ้าปิดใช้งาน/ไม่มี
-async function loadBonusConfig(companyId: string | null | undefined): Promise<any | null> {
-  if (!companyId) return null;
+// ⚠️ fallback: conversation เก่าอาจไม่มี companyId หรือบริษัทนั้นยังไม่ได้ตั้ง config
+//    → ใช้ config ตัวแรกที่เปิดใช้งานของ tenant แทน (จะได้ไม่ "เงียบ" ใส่ลูกค้า)
+async function loadBonusConfig(companyId: string | null | undefined, tenantId?: string): Promise<any | null> {
   try {
-    const cfg = await prisma.bonusTimeConfig.findUnique({ where: { companyId } });
-    if (!cfg || !cfg.isActive) return null;
-    return cfg;
+    if (companyId) {
+      const cfg = await prisma.bonusTimeConfig.findUnique({ where: { companyId } });
+      if (cfg && cfg.isActive) return cfg;
+    }
+    if (tenantId) {
+      const cfg = await prisma.bonusTimeConfig.findFirst({
+        where: { tenantId, isActive: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (cfg) return cfg;
+    }
+    return null;
   } catch { return null; }
 }
 
@@ -89,11 +99,20 @@ async function sendBonusMessages(ctx: BonusCtx, messages: any[]) {
 }
 
 // ส่งเมนูค่ายเกม — คืน false ถ้ายังไม่มีค่าย (ให้ flow ปกติทำงานต่อ)
+// ใช้ companyId ของ config เป็นหลัก (รองรับกรณี config มาจาก fallback ระดับ tenant)
 async function sendBonusMenu(ctx: BonusCtx): Promise<boolean> {
-  const camps = await prisma.bonusTimeCamp.findMany({
-    where: { companyId: ctx.conversation.companyId, isActive: true },
+  const campCompanyId = ctx.config?.companyId || ctx.conversation.companyId;
+  let camps = await prisma.bonusTimeCamp.findMany({
+    where: { companyId: campCompanyId, isActive: true },
     orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
   });
+  if (!camps.length) {
+    // fallback: หาค่ายจากทั้ง tenant (กันข้อมูลผูกคนละบริษัท)
+    camps = await prisma.bonusTimeCamp.findMany({
+      where: { tenantId: ctx.tenantId, isActive: true },
+      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
   if (!camps.length) return false;
   const messages = buildBonusTimeMenuMessages(ctx.config, camps as any);
   return sendBonusMessages(ctx, messages);
@@ -101,8 +120,9 @@ async function sendBonusMenu(ctx: BonusCtx): Promise<boolean> {
 
 // ส่งการ์ดเกมของค่าย
 async function sendBonusGames(ctx: BonusCtx, campId: string): Promise<boolean> {
+  // ค้นด้วย tenant (ไม่ล็อก companyId) — กัน postback หาไม่เจอเพราะ config มาจาก fallback
   const camp = await prisma.bonusTimeCamp.findFirst({
-    where: { id: campId, companyId: ctx.conversation.companyId },
+    where: { id: campId, tenantId: ctx.tenantId },
   });
   if (!camp) return sendBonusMenu(ctx);
   const games = await prisma.bonusTimeGame.findMany({
@@ -118,7 +138,7 @@ async function handleBonusPostback(tenantId: string, event: any, userId: string,
   const parsed = parseBonusPostback(event.postback?.data);
   if (!parsed) return; // postback อื่น — ไม่เกี่ยวกับ bonustime
   const { contact, conversation } = await resolveLineConvo(tenantId, userId, profile);
-  const config = await loadBonusConfig(conversation.companyId);
+  const config = await loadBonusConfig(conversation.companyId, tenantId);
   if (!config) return;
   const ctx: BonusCtx = { tenantId, conversation, contact, userId, replyToken: event.replyToken || null, accessToken, config };
   if (parsed.action === 'menu') await sendBonusMenu(ctx);
@@ -709,7 +729,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
   if (normalized.messageType !== 'text') return;
 
   // ⚡ BONUS TIME — โหลด config ครั้งเดียว (ใช้ทั้ง exemption, fast-path และ AI-token)
-  const btConfig = await loadBonusConfig(conversation.companyId);
+  const btConfig = await loadBonusConfig(conversation.companyId, tenantId);
   // คำถามเกี่ยวกับเกมแตก / bonustime / อัตราชนะ → "ตอบเสมอ" ไม่นับ repeat-abuse ไม่ handoff
   const isGameQuery = isHotGamesQuery(normalized.content) || (btConfig ? matchBonusTimeKeyword(normalized.content, btConfig) : false);
 
@@ -752,7 +772,28 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
       console.log(`[BonusTime] ⚡ keyword trigger → menu conv=${conversation.id}`);
       return;
     }
-    // ยังไม่มีค่ายในระบบ → ปล่อยให้ flow ปกติทำงานต่อ
+    // ยังไม่มีค่าย/ส่ง Flex ไม่ผ่าน → ห้ามเงียบ! ตอบ text แจ้งลูกค้าแล้วจบ
+    // (เดิมปล่อยไหลไป flow โปรโมชั่น → ลูกค้าถาม BONUSTIME แต่ได้คำตอบโปรฝาก งง)
+    const btFallback = 'ระบบ BONUS TIME กำลังอัปเดตข้อมูลค่ายเกมอยู่ค่ะ ⏳ อีกสักครู่พิมพ์ "BONUSTIME" มาใหม่ได้เลยนะคะ ✨';
+    try {
+      if (normalized.replyToken) {
+        await sendLineReply(normalized.replyToken, [lineTextMessage(btFallback)], accessToken);
+      } else {
+        await sendLinePush(userId, [lineTextMessage(btFallback)], accessToken);
+      }
+      const dbMsg = await prisma.message.create({
+        data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: btFallback },
+      });
+      emitToTenant(tenantId, 'new_message', {
+        conversationId: conversation.id,
+        message: { ...dbMsg, senderType: 'bot' },
+        contact, channel: 'line',
+      });
+    } catch (e: any) {
+      console.warn('[BonusTime] fallback text failed:', e?.message);
+    }
+    console.log(`[BonusTime] ⚠️ keyword matched but menu unavailable → text fallback conv=${conversation.id}`);
+    return;
   }
 
   // ✅ ตรวจสอบ: ถามว่าเกมไหนแตก → สุ่มแนะนำเกมตามช่วงเวลา

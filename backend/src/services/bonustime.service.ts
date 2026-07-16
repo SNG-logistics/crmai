@@ -46,11 +46,22 @@ export interface BTGame {
 
 // ─── คีย์เวิร์ด default (fast-path ไม่เปลืองโทเคน AI) ─────────────────────────
 export const DEFAULT_BONUS_KEYWORDS = [
-  'bonustime', 'bonus time', 'โบนัสไทม์', 'โบนัส ไทม์', 'บอนัสไทม์', 'บอนัดไทม์',
-  'winrate', 'win rate', 'วินเรท', 'อัตราชนะ', 'อัตราการชนะ',
-  'ai winrate', 'ระบบวิเคราะห์', 'ระบบ ai', 'เปอร์เซ็นต์เกม', '% เกม',
-  'ค่ายไหนแตก', 'ค่ายไหนดี', 'ดูอัตราชนะ', 'เช็คเกม',
+  'bonustime', 'bonus time', 'bonus tim', 'bonustim', 'bunustime', 'bonut time', 'โบนัสไทม์',
+  'โบนัส ไทม์', 'โบนัสไทม', 'โบนัสทาม', 'โบนัสทามส์', 'โบนัดไทม์', 'บอนัสไทม์', 'บอนัดไทม์',
+  'โบนัดทาม', 'บอนัสทาม', 'โบนัสไทมส์', 'โบนัสตาม',
+  'winrate', 'win rate', 'วินเรท', 'วินเรต', 'วินเรด', 'อัตราชนะ', 'อัตราการชนะ',
+  'ai winrate', 'ระบบวิเคราะห์', 'ระบบ ai', 'เปอร์เซ็นต์เกม', 'เปอร์เซ็นเกม', '% เกม',
+  'ค่ายไหนแตก', 'ค่ายไหนดี', 'ดูอัตราชนะ', 'เช็คเกม', 'เช็กเกม', 'ดูค่ายเกม',
 ];
+
+// normalize สำหรับ fuzzy match: ตัดวรรณยุกต์/การันต์ไทย + ช่องว่าง/สัญลักษณ์ทั้งหมด
+// → "โบนัส ไทม", "Bonus  Time!!", "โบนัสไทม์ๆ" จับได้หมด
+function normalizeBT(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .replace(/[็-๎]/g, '')      // ่ ้ ๊ ๋ ็ ์ ํ ๎
+    .replace(/[^a-z0-9ก-๙]+/g, '');       // ตัดช่องว่าง อีโมจิ เครื่องหมาย
+}
 
 // ─── ตัวช่วย ─────────────────────────────────────────────────────────────────
 export function parseJsonArray(raw?: string | null): string[] {
@@ -81,13 +92,22 @@ function langLine(raw?: string | null): string {
   return langs.map((l) => LANG_FLAG[l.toUpperCase()] || l).join(' ');
 }
 
-/** ตรวจว่าข้อความลูกค้าตรงกับคีย์เวิร์ด BONUSTIME ไหม (default + ที่ตั้งใน CRM) */
+/** ตรวจว่าข้อความลูกค้าตรงกับคีย์เวิร์ด BONUSTIME ไหม (default + ที่ตั้งใน CRM)
+ *  2 ชั้น: (1) substring ตรงๆ (2) fuzzy — ตัดช่องว่าง/วรรณยุกต์/การันต์ก่อนเทียบ
+ *  → "โบนัส ไทม", "BONUS TIME!!", "อยากดู bonustime หน่อย", "โบนัสไทม" จับได้หมด */
 export function matchBonusTimeKeyword(text: string, config?: Pick<BTConfig, 'keywords'> | null): boolean {
   const t = (text || '').toLowerCase().trim();
   if (!t) return false;
   const extra = parseJsonArray(config?.keywords).map((k) => k.toLowerCase());
   const all = [...DEFAULT_BONUS_KEYWORDS, ...extra];
-  return all.some((k) => k && t.includes(k));
+  if (all.some((k) => k && t.includes(k))) return true;
+  // fuzzy pass — normalize ทั้งข้อความและคีย์เวิร์ด
+  const nt = normalizeBT(t);
+  if (!nt) return false;
+  return all.some((k) => {
+    const nk = normalizeBT(k);
+    return nk.length >= 4 && nt.includes(nk);
+  });
 }
 
 // ─── LUX gold palette (LINE flex — โทนทองหรู) ────────────────────────────────
