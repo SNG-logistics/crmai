@@ -197,18 +197,63 @@ function buildSystemRules(s: BotSettings): string {
   return `กฎสำคัญ:\n${rules.join('\n')}`;
 }
 
-// ─── Core: Generate AI response ───────────────────────────────────────────────
+// ─── AI error log (ไฟล์) — ช่วย debug ว่า "ทำไมบอทตอบ ได้รับข้อความแล้ว" ─────────
+function logAI(line: string) {
+  try {
+    const fs = require('fs'); const path = require('path');
+    const dir = path.join(process.cwd(), 'logs');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'ai.log'), `[${new Date().toISOString()}] ${line}\n`);
+  } catch { /* ignore */ }
+}
+
+// รายชื่อโมเดลสำรอง — ถ้าตัวหลักล่ม/ตอบว่าง จะไล่ลองตัวถัดไปให้ "ตอบได้เสมอ"
+const FALLBACK_MODELS = (process.env.COMETAPI_FALLBACK_MODELS || 'gpt-4o-mini,gpt-4o,gpt-4.1-mini,gpt-3.5-turbo')
+  .split(',').map(s => s.trim()).filter(Boolean);
+
+// ─── Core: Generate AI response (มี model fallback + logging) ─────────────────
 export async function generateAIResponse(
   messages: { role: 'user' | 'assistant' | 'system'; content: string }[],
   model: string = DEFAULT_MODEL,
   temperature: number = 0.7,
   maxTokens: number = 200
 ): Promise<string> {
-  const response = await client.chat.completions.create({
-    model, messages, temperature,
-    max_tokens: maxTokens,
-  });
-  return response.choices[0]?.message?.content?.trim() || '';
+  // ไล่ลอง: โมเดลที่ขอ → โมเดลสำรอง (ไม่ซ้ำ) จนกว่าจะได้คำตอบที่ไม่ว่าง
+  const tryModels = [model, ...FALLBACK_MODELS].filter((m, i, a) => m && a.indexOf(m) === i);
+  let lastErr: any = null;
+  for (const m of tryModels) {
+    try {
+      const response = await client.chat.completions.create({
+        model: m, messages, temperature, max_tokens: maxTokens,
+      });
+      const out = response.choices[0]?.message?.content?.trim() || '';
+      if (out) {
+        if (m !== model) logAI(`OK via fallback model=${m} (primary=${model} failed/empty)`);
+        return out;
+      }
+      logAI(`EMPTY reply model=${m} finish=${response.choices[0]?.finish_reason}`);
+    } catch (e: any) {
+      lastErr = e;
+      logAI(`ERROR model=${m} status=${e?.status || e?.response?.status} msg=${e?.message || e?.response?.data?.error?.message}`);
+    }
+  }
+  if (lastErr) throw lastErr;   // ทุกโมเดล error → โยนให้ caller จัดการ (จะใช้ smart fallback)
+  return '';                    // ทุกโมเดลตอบว่าง (ไม่ error)
+}
+
+// self-test ตอน start server — พิมพ์ผลลง console + logs/ai.log
+export async function aiSelfTest(): Promise<void> {
+  try {
+    const r = await generateAIResponse(
+      [{ role: 'user', content: 'ตอบว่า "พร้อมใช้งาน" คำเดียว' }],
+      DEFAULT_MODEL, 0.2, 20,
+    );
+    const msg = r ? `AI SELF-TEST OK: "${r}"` : 'AI SELF-TEST EMPTY (ทุกโมเดลตอบว่าง)';
+    console.log('[AI] ✅ ' + msg); logAI(msg);
+  } catch (e: any) {
+    const msg = `AI SELF-TEST FAIL: status=${e?.status || e?.response?.status} msg=${e?.message || e?.response?.data?.error?.message}`;
+    console.error('[AI] ❌ ' + msg); logAI(msg);
+  }
 }
 
 // ─── Bot Message Processor v2 ─────────────────────────────────────────────────
@@ -302,18 +347,20 @@ BONUSTIME / โบนัสไทม์ / อัตราชนะเกม / wi
 
     // ตัดโทเคนระบบ + ล้าง markdown/ลิงก์ซ้ำ ก่อนส่งเข้าแชท
     const isBonusToken = /\[\[BONUSTIME\]\]/i.test(raw);
-    const cleanReply = isBonusToken
-      ? '[[BONUSTIME]]'
-      : sanitizeForChat(raw.replace(/HANDOFF_REQUESTED/gi, ''))
-        || 'ได้รับข้อความแล้วนะคะ สอบถามเพิ่มเติมได้เลยค่ะ 🙏';
+    const cleaned = isBonusToken ? '[[BONUSTIME]]' : sanitizeForChat(raw.replace(/HANDOFF_REQUESTED/gi, ''));
+    if (!cleaned) logAI(`processBotMessage: empty after clean. userMsg="${userMessage.slice(0, 60)}"`);
+    const cleanReply = cleaned || 'ขออภัยค่ะ ระบบตอบอัตโนมัติขัดข้องชั่วคราว 🙏 รอแอดมินสักครู่นะคะ';
     const shouldHandoff = checkHandoff(userMessage, raw, settings.handoffKeywords);
 
-    return { reply: cleanReply || 'ได้รับข้อความแล้วนะคะ 🙏', shouldHandoff };
+    return { reply: cleanReply, shouldHandoff };
   } catch (e: any) {
-    console.error('[AI] ❌ processBotMessage failed:', e?.response?.status, e?.response?.data?.error?.message || e?.response?.data?.message || e?.message);
+    const emsg = e?.response?.data?.error?.message || e?.response?.data?.message || e?.message;
+    console.error('[AI] ❌ processBotMessage failed:', e?.response?.status, emsg);
+    logAI(`processBotMessage FAILED status=${e?.status || e?.response?.status} msg=${emsg}`);
     return {
-      reply: 'ได้รับข้อความแล้วนะคะ 🙏 รบกวนพิมพ์คำถามอีกครั้งได้เลยค่ะ',
-      shouldHandoff: false, // AI ล่มก็ไม่สลับ human — บอทดูแลต่อ
+      // AI ล่มทุกโมเดล → แจ้งตรงๆ + โอนให้แอดมิน (ไม่ตอบกำกวมว่า "ได้รับข้อความแล้ว")
+      reply: 'ขออภัยค่ะ ระบบตอบอัตโนมัติขัดข้องชั่วคราว 🙏 รอแอดมินตอบสักครู่นะคะ',
+      shouldHandoff: false,
     };
   }
 }

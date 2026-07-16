@@ -191,6 +191,8 @@ async function main() {
       console.log(`🚀 CRM Backend running on http://localhost:${PORT}`);
       console.log(`📡 Socket.io ready`);
       console.log(`🌍 Environment: ${process.env.NODE_ENV}`);
+      // ทดสอบ AI ตอน start — บอกทันทีว่า key/model ใช้ได้ไหม (ดูใน console + logs/ai.log)
+      import('./services/ai.service').then(m => m.aiSelfTest()).catch(() => {});
       // Auto-reconnect WhatsApp sessions ที่มีอยู่
       initWhatsAppSessions().catch(console.error);
       // Auto-start PKM real-time listener
