@@ -29,12 +29,16 @@ khodtuengai.com, www.khodtuengai.com {
 	}
 }
 
-# ─── lufy บน subdomain (DNS: A link → VPS IP ตั้งแล้ว) ─────────────
-# modules/lufy/frontend/.env.local ต้องเป็น
-#     NEXT_PUBLIC_API_URL=https://link.khodtuengai.com/api
-link.khodtuengai.com {
+# ─── lufy (ตัวย่อลิงก์) — โดเมน vrc2.cc + link.khodtuengai.com ─────────
+#  ทั้งสองโดเมนชี้ไป lufy ตัวเดียวกัน: /api → backend :3001 , ที่เหลือ → frontend :3002
+#  ⚠️ vrc2.cc ต้องอยู่ในไฟล์นี้เสมอ ไม่งั้น pull ทับแล้ว vrc2.cc จะเข้าไม่ได้
+#  (DNS ของ vrc2.cc + www.vrc2.cc ต้องชี้ A record มาที่ IP ของ VPS)
+vrc2.cc, www.vrc2.cc, link.khodtuengai.com {
 	encode gzip
 	handle /api/* {
+		reverse_proxy localhost:3001
+	}
+	handle /socket.io/* {
 		reverse_proxy localhost:3001
 	}
 	handle {
