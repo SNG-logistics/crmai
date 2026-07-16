@@ -123,9 +123,12 @@ const LUX_TRACK = '#2A2410';   // รางหลอด %
 // ─── LINE Flex: เมนูตารางค่ายเกม ─────────────────────────────────────────────
 function campCell(camp: BTCamp): any {
   const inner: any[] = [];
-  if (camp.logo) {
+  // ⚠️ LINE Flex รองรับเฉพาะรูป PNG/JPEG — ถ้าโลโก้เป็น .gif/.webp ต้องข้าม
+  //    ไม่งั้น LINE ปฏิเสธทั้งข้อความ → เมนูค่ายเกมไม่ขึ้นเลย (นี่คือสาเหตุที่ BONUSTIME เงียบ)
+  const logoOk = flexImg(camp.logo);
+  if (logoOk) {
     inner.push({
-      type: 'image', url: camp.logo, size: 'full', aspectMode: 'fit', aspectRatio: '2:1',
+      type: 'image', url: logoOk, size: 'full', aspectMode: 'fit', aspectRatio: '2:1',
     });
   } else {
     inner.push({
