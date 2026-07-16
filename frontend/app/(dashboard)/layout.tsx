@@ -43,8 +43,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [inboxUnread, setInboxUnread] = useState(0);
   const [onlineStatus, setOnlineStatus] = useState<'online' | 'away'>('online');
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
   useEffect(() => { loadFromStorage(); }, []);
+
+  // ─── Theme (Light/Dark) — จำค่าไว้ใน localStorage เปลี่ยนทั้งระบบ ───
+  useEffect(() => {
+    const saved = (typeof window !== 'undefined' ? localStorage.getItem('crm-theme') : null) as 'dark' | 'light' | null;
+    const initial: 'dark' | 'light' = saved === 'light' ? 'light' : 'dark';
+    setTheme(initial);
+    document.documentElement.setAttribute('data-theme', initial);
+  }, []);
+  const toggleTheme = () => {
+    setTheme(prev => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('crm-theme', next); } catch {}
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!isLoading && !token) {
@@ -221,6 +238,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </h1>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+            {/* Theme toggle (Light/Dark) */}
+            <button onClick={toggleTheme} title={theme === 'dark' ? 'สลับเป็นโหมดสว่าง' : 'สลับเป็นโหมดมืด'}
+              style={{ width: 34, height: 34, borderRadius: 20, border: '1px solid var(--border)', background: 'var(--bg-tertiary)', cursor: 'pointer', fontSize: '0.95rem', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}>
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
             {/* Language Badge */}
             <button onClick={toggleLang} title="เปลี่ยนภาษา / ປ່ຽນພາສາ"
               style={{ padding: '3px 10px', borderRadius: 20, border: '1px solid var(--border)', background: 'var(--bg-tertiary)', cursor: 'pointer', fontSize: '0.72rem', fontFamily: 'inherit', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>

@@ -35,6 +35,35 @@
   --glass-border: rgba(255, 255, 255, 0.06);
 }
 
+/* ☀️ LIGHT MODE — สลับได้จากปุ่มบน topbar (ทั้งระบบเปลี่ยนพร้อมกัน) */
+:root[data-theme="light"] {
+  --bg-primary: #EEF2F9;
+  --bg-secondary: #FFFFFF;
+  --bg-tertiary: #F1F5FB;
+  --bg-hover: #E4EAF5;
+  --border: rgba(15, 23, 42, 0.08);
+  --border-hover: rgba(15, 23, 42, 0.16);
+  --teal: #0091EA;
+  --teal-dark: #0277BD;
+  --teal-glow: rgba(0, 145, 234, 0.12);
+  --purple: #7C3AED;
+  --purple-glow: rgba(124, 58, 237, 0.12);
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-muted: #8592A6;
+  --danger: #E11D48;
+  --warning: #D97706;
+  --success: #059669;
+  --info: #0369A1;
+  --shadow: 0 8px 28px rgba(15, 23, 42, 0.10);
+  --shadow-glow: 0 0 18px rgba(0, 145, 234, 0.15);
+  --gradient-dark: linear-gradient(135deg, #FFFFFF 0%, #F4F7FC 100%);
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(15, 23, 42, 0.07);
+}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, 0.18); }
+:root[data-theme="light"] body { background: var(--bg-primary); }
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html { font-size: 15px; -webkit-font-smoothing: antialiased; }
