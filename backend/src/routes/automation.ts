@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { getChannelConfig } from '../lib/channel-config';
 import { verifyToken } from '../middleware/auth';
-import { sendLinePush, lineTextMessage, lineFlexMessage } from '../services/line.service';
+import { sendLinePush, lineTextMessage } from '../services/line.service';
 import { sendTelegramMessage } from '../services/telegram.service';
 
 const router = Router();

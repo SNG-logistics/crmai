@@ -49,6 +49,8 @@ model Tenant {
   bonusTimeCamps    BonusTimeCamp[]
   bonusTimeGames    BonusTimeGame[]
   quickReplies      QuickReply[]
+  slotProviders     SlotProvider[]
+  slotLeads         SlotLead[]
 }
 
 // =============================================
@@ -707,4 +709,90 @@ model BonusTimeGame {
 
   @@index([tenantId])
   @@index([campId])
+}
+
+// =============================================
+// Slot Bot Module
+// =============================================
+
+model SlotProvider {
+  id        String     @id @default(cuid())
+  tenantId  String
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code      String
+  name      String
+  logoUrl   String?
+  sortOrder Int        @default(0)
+  isActive  Boolean    @default(true)
+  games     SlotGame[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+}
+
+model SlotGame {
+  id              String        @id @default(cuid())
+  tenantId        String
+  providerId      String
+  provider        SlotProvider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  code            String
+  name            String
+  slug            String
+  imageUrl        String?
+  description     String?
+  playUrl         String?
+  tags            String        @default("[]")
+  isRecommended   Boolean       @default(false)
+  isActive        Boolean       @default(true)
+  popularityScore Int           @default(0)
+  bonusScore      Int           @default(0)
+  featureScore    Int           @default(0)
+  events          SlotEvent[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@index([providerId])
+}
+
+model SlotEvent {
+  id             String    @id @default(cuid())
+  tenantId       String
+  telegramUserId String?
+  contactId      String?
+  gameId         String?
+  game           SlotGame? @relation(fields: [gameId], references: [id], onDelete: SetNull)
+  providerId     String?
+  campaignSource String?
+  eventType      String
+  metadata       String    @default("{}")
+  createdAt      DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([telegramUserId])
+  @@index([gameId])
+  @@index([eventType])
+}
+
+model SlotLead {
+  id             String   @id @default(cuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  telegramId     String
+  displayName    String?
+  username       String?
+  contactId      String?
+  consentStatus  String   @default("OPTED_IN")
+  campaignSource String?
+  tags           String   @default("[]")
+  lastActiveAt   DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([tenantId, telegramId])
+  @@index([tenantId])
+  @@index([consentStatus])
 }

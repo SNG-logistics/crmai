@@ -4,11 +4,8 @@ import { parseTelegramUpdate, sendTelegramMessage } from '../../services/telegra
 import { processBotMessage } from '../../services/ai.service';
 import { emitToTenant } from '../../lib/socket';
 import { defaultCompanyId } from '../../lib/company-scope';
-<<<<<<< HEAD
 import { getChannelConfig } from '../../lib/channel-config';
 import { captureCustomerInfo, mightContainCustomerInfo, readProfile, buildProfileContext, isRegisterIntent, buildRegisterReply } from '../../services/contact-memory.service';
-=======
->>>>>>> 9389793 (feat: BonusTime camp dropdown selector + slot bot + various updates)
 
 const router = Router();
 
@@ -96,13 +93,8 @@ async function handleTelegramWebhook(req: Request, res: Response) {
       where: { tenantId_channel_channelId: { tenantId, channel: 'telegram', channelId: chatId } },
     });
     if (!conversation) {
-<<<<<<< HEAD
       // ผูกบริษัทของช่องทางนี้ — ไม่มีก็ใช้บริษัทเริ่มต้นของ tenant
       const companyId = companyIdHint || (channelConfig as any).companyId || await defaultCompanyId(tenantId);
-=======
-      // ผูกบริษัทเริ่มต้นของ tenant — ไม่งั้น conv จะหายไปจาก inbox เมื่อกรองตามบริษัท
-      const companyId = await defaultCompanyId(tenantId);
->>>>>>> 9389793 (feat: BonusTime camp dropdown selector + slot bot + various updates)
       conversation = await prisma.conversation.create({
         data: { tenantId, companyId, contactId: contact.id, channel: 'telegram', channelId: chatId, status: 'bot', isBot: true },
       });

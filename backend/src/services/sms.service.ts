@@ -59,8 +59,8 @@ async function getSmsConfig(tenantId: string): Promise<{
   apiKey: string;
   sender: string;
 } | null> {
-  const channel = await prisma.channelConfig.findUnique({
-    where: { tenantId_channel: { tenantId, channel: 'sms' } },
+  const channel = await prisma.channelConfig.findFirst({
+    where: { tenantId, channel: 'sms', companyId: null },
   });
   if (!channel || !channel.isActive) return null;
   const cfg = parseConfig(channel.config);

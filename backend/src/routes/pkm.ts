@@ -32,17 +32,29 @@ router.post('/config', async (req: Request, res: Response) => {
   try {
     const { baseUrl, username, password, domain } = req.body;
     const tenantId = req.tenantId!;
-    await prisma.channelConfig.upsert({
-      where: { tenantId_channel: { tenantId, channel: 'pkm' } },
-      create: {
-        tenantId, channel: 'pkm', isActive: true,
-        config: JSON.stringify({ baseUrl: baseUrl || PKM_BASE, username, password, domain }),
-      },
-      update: {
-        config: JSON.stringify({ baseUrl: baseUrl || PKM_BASE, username, password, domain }),
-        isActive: true,
-      },
+    const existing = await prisma.channelConfig.findFirst({
+      where: { tenantId, channel: 'pkm', companyId: null }
     });
+
+    if (existing) {
+      await prisma.channelConfig.update({
+        where: { id: existing.id },
+        data: {
+          config: JSON.stringify({ baseUrl: baseUrl || PKM_BASE, username, password, domain }),
+          isActive: true,
+        },
+      });
+    } else {
+      await prisma.channelConfig.create({
+        data: {
+          tenantId,
+          channel: 'pkm',
+          isActive: true,
+          companyId: null,
+          config: JSON.stringify({ baseUrl: baseUrl || PKM_BASE, username, password, domain }),
+        },
+      });
+    }
     res.json({ success: true, message: '✅ บันทึก PKM config แล้ว' });
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
 });

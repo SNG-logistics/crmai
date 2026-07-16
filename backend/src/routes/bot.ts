@@ -142,13 +142,13 @@ router.post('/auto-seed', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'ไม่ได้รับ Q&A จาก AI' });
     }
 
-    const created = [];
+    const created: any[] = [];
     for (const item of items) {
       if (!item.question || !item.answer) continue;
       const kb = await prisma.knowledgeBase.create({
         data: { botConfigId: bot.id, question: item.question.trim(), answer: item.answer.trim(), category, isActive: true },
       });
-      created.push(kb);
+      created.push(kb as any);
     }
 
     return res.json({ success: true, message: `✅ สร้าง Q&A สำเร็จ ${created.length} ข้อ`, items: created, count: created.length });

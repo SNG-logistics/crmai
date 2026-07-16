@@ -24,8 +24,8 @@ router.get('/content/:messageId', async (req: Request, res: Response): Promise<v
     const { messageId } = req.params;
 
     // หา LINE access token ของ tenant
-    const channelConfig = await prisma.channelConfig.findUnique({
-      where: { tenantId_channel: { tenantId: req.tenantId!, channel: 'line' } },
+    const channelConfig = await prisma.channelConfig.findFirst({
+      where: { tenantId: req.tenantId!, channel: 'line', companyId: null },
     });
 
     if (!channelConfig) {
@@ -55,7 +55,7 @@ router.get('/content/:messageId', async (req: Request, res: Response): Promise<v
 
     // Set headers
     const contentType = response.headers['content-type'] || 'image/jpeg';
-    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Type', String(contentType));
     res.setHeader('Cache-Control', 'public, max-age=86400'); // cache 24 hours
 
     // Pipe stream ไปยัง response

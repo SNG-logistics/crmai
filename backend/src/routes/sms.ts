@@ -24,8 +24,8 @@ router.get('/balance', async (req: Request, res: Response) => {
 // ─── GET /api/sms/config — ดู SMS config ──────────────────────────────────────
 router.get('/config', async (req: Request, res: Response) => {
   try {
-    const channel = await prisma.channelConfig.findUnique({
-      where: { tenantId_channel: { tenantId: req.tenantId!, channel: 'sms' } },
+    const channel = await prisma.channelConfig.findFirst({
+      where: { tenantId: req.tenantId!, channel: 'sms', companyId: null },
     });
     if (!channel) return res.json({ success: true, configured: false });
     const cfg = parseConfig(channel.config);
@@ -46,11 +46,30 @@ router.post('/config', async (req: Request, res: Response) => {
     const { provider, apiKey, sender } = req.body;
     if (!provider) return res.status(400).json({ success: false, message: 'กรุณาเลือก Provider' });
 
-    await prisma.channelConfig.upsert({
-      where:  { tenantId_channel: { tenantId: req.tenantId!, channel: 'sms' } },
-      create: { tenantId: req.tenantId!, channel: 'sms', isActive: true, config: JSON.stringify({ provider, apiKey, sender: sender || 'CRM' }) },
-      update: { isActive: true, config: JSON.stringify({ provider, apiKey, sender: sender || 'CRM' }) },
+    const tenantId = req.tenantId!;
+    const existing = await prisma.channelConfig.findFirst({
+      where: { tenantId, channel: 'sms', companyId: null },
     });
+
+    if (existing) {
+      await prisma.channelConfig.update({
+        where: { id: existing.id },
+        data: {
+          isActive: true,
+          config: JSON.stringify({ provider, apiKey, sender: sender || 'CRM' }),
+        },
+      });
+    } else {
+      await prisma.channelConfig.create({
+        data: {
+          tenantId,
+          channel: 'sms',
+          isActive: true,
+          companyId: null,
+          config: JSON.stringify({ provider, apiKey, sender: sender || 'CRM' }),
+        },
+      });
+    }
 
     res.json({ success: true, message: 'บันทึก SMS config เรียบร้อย' });
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
