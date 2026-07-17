@@ -19,29 +19,19 @@ const router = Router();
 // ⚡ BONUS TIME helpers
 // ════════════════════════════════════════════════════════════════════════════
 
-// โหลด config ของบริษัท — เคารพการตั้งค่า per-company:
-//   • บริษัทมี config และเปิด → ใช้ของบริษัทนั้น
-//   • บริษัทมี config แต่ "ปิด" → คืน null (แอดมินตั้งใจปิด บริษัทนี้ห้ามโชว์)
-//   • บริษัทไม่มี config เลย (ห้องเก่า/ยังไม่ตั้ง) → fallback ใช้ config ที่เปิดตัวแรกของ tenant
-async function loadBonusConfig(companyId: string | null | undefined, tenantId?: string): Promise<any | null> {
+// โหลด config ของบริษัท — แยกขาดต่อบริษัท 100% (ไม่มี fallback ข้ามบริษัท):
+//   • บริษัทมี config และเปิดสวิตช์ (จาก dropdown หน้า BONUS TIME) → ใช้ของบริษัทนั้น
+//   • บริษัทปิดสวิตช์ หรือยังไม่เคยตั้งค่า → ไม่โชว์ BONUS TIME กับ OA นั้นเลย
+async function loadBonusConfig(companyId: string | null | undefined, _tenantId?: string): Promise<any | null> {
   try {
-    if (companyId) {
-      const cfg = await prisma.bonusTimeConfig.findUnique({ where: { companyId } });
-      if (cfg) return cfg.isActive ? cfg : null; // มี config → เคารพสวิตช์เปิด/ปิดของบริษัทนั้น
-    }
-    if (tenantId) {
-      const cfg = await prisma.bonusTimeConfig.findFirst({
-        where: { tenantId, isActive: true },
-        orderBy: { createdAt: 'asc' },
-      });
-      if (cfg) return cfg;
-    }
-    return null;
+    if (!companyId) return null;
+    const cfg = await prisma.bonusTimeConfig.findUnique({ where: { companyId } });
+    return (cfg && cfg.isActive) ? cfg : null;
   } catch { return null; }
 }
 
 // หา/สร้าง contact + conversation สำหรับ LINE userId (ใช้กับ postback)
-async function resolveLineConvo(tenantId: string, userId: string, profile: any) {
+async function resolveLineConvo(tenantId: string, userId: string, profile: any, companyIdHint?: string | null) {
   let contact = await prisma.contact.findUnique({
     where: { tenantId_lineUserId: { tenantId, lineUserId: userId } },
   });
@@ -54,9 +44,15 @@ async function resolveLineConvo(tenantId: string, userId: string, profile: any) 
     where: { tenantId_channel_channelId: { tenantId, channel: 'line', channelId: userId } },
   });
   if (!conversation) {
-    const companyId = await defaultCompanyId(tenantId);
+    const companyId = companyIdHint || await defaultCompanyId(tenantId);
     conversation = await prisma.conversation.create({
       data: { tenantId, companyId, contactId: contact.id, channel: 'line', channelId: userId, status: 'bot', isBot: true },
+    });
+  } else if (companyIdHint && conversation.companyId !== companyIdHint) {
+    // ห้องแชทตาม OA ที่ลูกค้ากดล่าสุด (แยกบริษัทเด็ดขาด)
+    conversation = await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { companyId: companyIdHint },
     });
   }
   // ⚠️ เคารพโหมด Human: ไม่บังคับกลับเป็นบอทเมื่อแอดมินดูแลอยู่ (isBot=false)
@@ -100,20 +96,13 @@ async function sendBonusMessages(ctx: BonusCtx, messages: any[]) {
 }
 
 // ส่งเมนูค่ายเกม — คืน false ถ้ายังไม่มีค่าย (ให้ flow ปกติทำงานต่อ)
-// ใช้ companyId ของ config เป็นหลัก (รองรับกรณี config มาจาก fallback ระดับ tenant)
+// ⚠️ แยกต่อบริษัทเด็ดขาด: ใช้เฉพาะค่ายของบริษัทเจ้าของ config เท่านั้น ไม่หยิบข้ามบริษัท
 async function sendBonusMenu(ctx: BonusCtx): Promise<boolean> {
   const campCompanyId = ctx.config?.companyId || ctx.conversation.companyId;
-  let camps = await prisma.bonusTimeCamp.findMany({
+  const camps = await prisma.bonusTimeCamp.findMany({
     where: { companyId: campCompanyId, isActive: true },
     orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
   });
-  if (!camps.length) {
-    // fallback: หาค่ายจากทั้ง tenant (กันข้อมูลผูกคนละบริษัท)
-    camps = await prisma.bonusTimeCamp.findMany({
-      where: { tenantId: ctx.tenantId, isActive: true },
-      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
-    });
-  }
   if (!camps.length) return false;
   const messages = buildBonusTimeMenuMessages(ctx.config, camps as any);
   return sendBonusMessages(ctx, messages);
@@ -135,10 +124,10 @@ async function sendBonusGames(ctx: BonusCtx, campId: string): Promise<boolean> {
 }
 
 // จัดการ postback ของ BONUS TIME (กดปุ่มค่าย / กลับเมนู)
-async function handleBonusPostback(tenantId: string, event: any, userId: string, profile: any, accessToken: string) {
+async function handleBonusPostback(tenantId: string, event: any, userId: string, profile: any, accessToken: string, companyIdHint?: string | null) {
   const parsed = parseBonusPostback(event.postback?.data);
   if (!parsed) return; // postback อื่น — ไม่เกี่ยวกับ bonustime
-  const { contact, conversation } = await resolveLineConvo(tenantId, userId, profile);
+  const { contact, conversation } = await resolveLineConvo(tenantId, userId, profile, companyIdHint);
   const config = await loadBonusConfig(conversation.companyId, tenantId);
   if (!config) return;
   const ctx: BonusCtx = { tenantId, conversation, contact, userId, replyToken: event.replyToken || null, accessToken, config };
@@ -568,7 +557,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
 
   // ─── ⚡ BONUS TIME postback (กดปุ่มค่ายเกม / กลับเมนู) ─────────────────────
   if (event.type === 'postback') {
-    try { await handleBonusPostback(tenantId, event, userId, profile, accessToken); }
+    try { await handleBonusPostback(tenantId, event, userId, profile, accessToken, companyIdHint); }
     catch (e: any) { console.error('[BonusTime] postback error:', e?.message || e); }
     return;
   }
@@ -656,11 +645,22 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     where: { tenantId_channel_channelId: { tenantId, channel: 'line', channelId: userId } },
   });
   if (!conversation) {
-    // ผูกบริษัทของ LINE OA นี้ (จาก webhook URL) — ไม่มีก็ใช้บริษัทเริ่มต้นของ tenant
+    // ผูกบริษัทของ LINE OA นี้ (จาก webhook/secret ที่ตรง) — ไม่มีก็ใช้บริษัทเริ่มต้นของ tenant
     const companyId = companyIdHint || await defaultCompanyId(tenantId);
     conversation = await prisma.conversation.create({
       data: { tenantId, companyId, contactId: contact.id, channel: 'line', channelId: userId, status: 'bot', isBot: true },
     });
+  } else if (companyIdHint && conversation.companyId !== companyIdHint) {
+    // ⚠️ ลูกค้าคนเดิม (LINE userId เดียวกัน) ทักมาจาก "OA ของอีกบริษัท"
+    //    → ย้ายห้องแชทไปบริษัทของ OA ที่ทักล่าสุด (ไม่งั้นบอท/BONUS TIME จะใช้ของบริษัทเก่าตลอด)
+    conversation = await prisma.conversation.update({
+      where: { id: conversation.id },
+      data: { companyId: companyIdHint },
+    });
+    emitToTenant(tenantId, 'conversation_updated', {
+      conversationId: conversation.id, companyId: companyIdHint,
+    });
+    console.log(`[LINE] 🔀 conversation ${conversation.id} switched company → ${companyIdHint} (OA ที่ลูกค้าทักล่าสุด)`);
   }
 
   // ─── Save incoming message ────────────────────────────────────────────────
@@ -820,29 +820,9 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     return;
   }
 
-  // ✅ ถามหาเกมแตก/เกมไหนดี แต่ระบบ BONUS TIME ยังไม่พร้อม (btConfig ว่าง)
-  //    ⚠️ ห้ามส่งลิสต์แนะนำเกมแบบเดิมเด็ดขาด (ลูกค้าไม่ต้องการ) — ตอบสั้นๆ ให้พิมพ์ BONUSTIME
-  if (isHotGamesQuery(normalized.content)) {
-    const reply = 'ดูอัตราชนะเกมแต่ละค่ายแบบเรียลไทม์ได้เลยค่ะ พิมพ์ว่า "BONUSTIME" มาได้เลยนะคะ ✨';
-    try {
-      if (normalized.replyToken) {
-        await sendLineReply(normalized.replyToken, [lineTextMessage(reply)], accessToken);
-      } else {
-        await sendLinePush(userId, [lineTextMessage(reply)], accessToken);
-      }
-      const dbMsg = await prisma.message.create({
-        data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: reply },
-      });
-      emitToTenant(tenantId, 'new_message', {
-        conversationId: conversation.id,
-        message: { ...dbMsg, senderType: 'bot' },
-        contact, channel: 'line',
-      });
-    } catch (e: any) {
-      console.warn(`[LINE Bot] hot-games fallback failed:`, e.message);
-    }
-    return; // บอทตอบเอง ไม่ handoff
-  }
+  // ✅ ถามหาเกมแตก/เกมไหนดี แต่บริษัทนี้ "ปิด" BONUS TIME (btConfig ว่าง)
+  //    → ไม่โฆษณา BONUSTIME, ไม่ส่งลิสต์เกมเดิม — ปล่อยให้ AI ตอบตามข้อมูลธุรกิจปกติ
+  //    (เปิด/ปิดต่อบริษัทได้ที่หน้า ตั้งค่า → BONUS TIME → dropdown บริษัท)
 
   // ✅ ตรวจสอบ: ลูกค้าส่งเบอร์โทรศัพท์มา → ตอบกลับรับรู้ข้อมูลลูกค้าแล้ว และส่งต่อให้เจ้าหน้าที่ทันที
   if (isPhoneNumber(normalized.content)) {
