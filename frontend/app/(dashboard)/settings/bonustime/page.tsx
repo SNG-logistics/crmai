@@ -54,9 +54,6 @@ const LUX_CSS = `
 .bt-btn-solid{border:none;background:linear-gradient(135deg,#ffe9a8,#ffd700,#e8b923);color:#231a06;border-radius:10px;padding:9px 18px;font-weight:900;cursor:pointer}
 .bt-btn-solid:hover{filter:brightness(1.05)}
 .bt-btn-danger{border:1px solid rgba(239,68,68,.35);background:transparent;color:#f87171;border-radius:8px;padding:5px 9px;cursor:pointer}
-<<<<<<< HEAD
-.bt-toggle{display:flex;align-items:center;gap:9px;cursor:pointer;padding:9px 16px;border-radius:12px;font-weight:800;border:1px solid rgba(255,215,0,.3)}
-=======
 .bt-toggle{display:flex;align-items:center;gap:9px;cursor:pointer;padding:9px 16px;border-radius:12px;font-weight:800;
   border:1px solid rgba(255,215,0,.3)}
 
@@ -174,7 +171,16 @@ const LUX_CSS = `
 .bt-camp-dd-item-name{flex:1;font-weight:800;font-size:.88rem;color:#f6e7bd}
 .bt-camp-dd-item-meta{font-size:.7rem;color:#8a7a4e}
 .bt-camp-dd-item-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
->>>>>>> 9389793 (feat: BonusTime camp dropdown selector + slot bot + various updates)
+
+/* ── Company Selector ─────────────────────────────────────── */
+.bt-co-wrap{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;
+  background:linear-gradient(180deg,rgba(38,31,17,.6),rgba(18,16,26,.6));
+  border:1px solid rgba(255,215,0,.28);border-radius:14px;padding:12px 16px}
+.bt-co-lbl{font-size:.78rem;font-weight:800;color:#ffe9a8;display:flex;align-items:center;gap:6px}
+.bt-co-select{flex:1;min-width:220px;background:#0e0d15;border:1px solid rgba(255,215,0,.3);
+  border-radius:10px;padding:9px 12px;color:#f4ecd6;font-size:.9rem;font-weight:700;outline:none;cursor:pointer}
+.bt-co-select:focus{border-color:rgba(255,215,0,.65)}
+.bt-co-hint{font-size:.68rem;color:#8a7a4e;width:100%}
 `;
 
 // ─── Animated gold % bar (admin editor) ───────────────────────────────────────
@@ -517,6 +523,8 @@ function CampDropdown({
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
+interface CompanyOpt { id: string; name: string; isActive?: boolean }
+
 export default function BonusTimePage() {
   const [config, setConfig] = useState<Config | null>(null);
   const [camps, setCamps] = useState<Camp[]>([]);
@@ -529,9 +537,16 @@ export default function BonusTimePage() {
   const uploadRef = useRef<{ cb: (url: string) => void } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const load = async () => {
+  // ── Company selector — เลือกว่ากำลังตั้งค่า BONUS TIME ของบริษัทไหน ──
+  const [companies, setCompanies] = useState<CompanyOpt[]>([]);
+  const [companyId, setCompanyId] = useState<string>('');   // '' = default บริษัทแรก
+  const coQS = companyId ? `?companyId=${companyId}` : '';
+  const coParam = companyId ? { companyId } : {};
+
+  const load = async (cid?: string) => {
+    const q = (cid ?? companyId) ? `?companyId=${cid ?? companyId}` : '';
     try {
-      const r = await api.get('/bonustime');
+      const r = await api.get(`/bonustime${q}`);
       const cfg = r.data.config;
       setConfig({
         isActive: cfg.isActive, headerTitle: cfg.headerTitle, headerSubtitle: cfg.headerSubtitle,
@@ -542,11 +557,30 @@ export default function BonusTimePage() {
       });
       setCamps(r.data.camps || []);
       setDefaultKeywords(r.data.defaultKeywords || []);
+      // sync companyId ที่ backend เลือกให้ (กรณีเปิดหน้าครั้งแรกไม่ได้ระบุ)
+      if (!cid && !companyId && r.data.companyId) setCompanyId(r.data.companyId);
     } catch (e: any) {
       toast.error(e.response?.data?.message || 'โหลดข้อมูลไม่สำเร็จ');
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
+
+  // โหลดรายชื่อบริษัท + จำบริษัทที่เลือกล่าสุดไว้
+  useEffect(() => {
+    api.get('/companies').then(r => setCompanies(r.data.companies || [])).catch(() => {});
+    try {
+      const saved = localStorage.getItem('bt-company');
+      if (saved) { setCompanyId(saved); setLoading(true); load(saved); }
+    } catch {}
+  }, []);
+
+  const switchCompany = (id: string) => {
+    setCompanyId(id);
+    setSelectedCampId(null);
+    setLoading(true);
+    try { localStorage.setItem('bt-company', id); } catch {}
+    load(id);
+  };
 
   // ─── image upload ───────────────────────────────────────────────────────────
   const pickImage = (cb: (url: string) => void) => { uploadRef.current = { cb }; fileInput.current?.click(); };
@@ -566,7 +600,7 @@ export default function BonusTimePage() {
     if (!config) return;
     setSavingCfg(true);
     try {
-      await api.put('/bonustime/config', { ...config, keywords: config.keywords });
+      await api.put('/bonustime/config', { ...config, keywords: config.keywords, ...coParam });
       toast.success('✅ บันทึกการตั้งค่าแล้ว'); load();
     } catch (e: any) { toast.error(e.response?.data?.message || 'บันทึกไม่สำเร็จ'); }
     finally { setSavingCfg(false); }
@@ -575,46 +609,46 @@ export default function BonusTimePage() {
 
   const seed = async () => {
     const t = toast.loading('กำลังเพิ่มค่าย/เกมตัวอย่าง...');
-    try { const r = await api.post('/bonustime/seed'); toast.success(r.data.message, { id: t }); load(); }
+    try { const r = await api.post('/bonustime/seed', { ...coParam }); toast.success(r.data.message, { id: t }); load(); }
     catch (e: any) { toast.error(e.response?.data?.message || 'ไม่สำเร็จ', { id: t }); }
   };
 
   // ─── camp ops ──────────────────────────────────────────────────────────────
   const addCamp = async () => {
     const name = prompt('ชื่อค่ายเกม (เช่น JILI)'); if (!name) return;
-    try { await api.post('/bonustime/camps', { name, order: camps.length }); load(); }
+    try { await api.post('/bonustime/camps', { name, order: camps.length, ...coParam }); load(); }
     catch (e: any) { toast.error(e.response?.data?.message || 'เพิ่มไม่สำเร็จ'); }
   };
   const updateCamp = async (id: string, data: Partial<Camp>) => {
-    try { await api.put(`/bonustime/camps/${id}`, data); load(); }
+    try { await api.put(`/bonustime/camps/${id}${coQS}`, data); load(); }
     catch (e: any) { toast.error(e.response?.data?.message || 'แก้ไขไม่สำเร็จ'); }
   };
   const delCamp = async (c: Camp) => {
     if (!confirm(`ลบค่าย "${c.name}" และเกมทั้งหมดในค่าย?`)) return;
-    try { await api.delete(`/bonustime/camps/${c.id}`); load(); }
+    try { await api.delete(`/bonustime/camps/${c.id}${coQS}`); load(); }
     catch (e: any) { toast.error('ลบไม่สำเร็จ'); }
   };
 
   // ─── game ops ──────────────────────────────────────────────────────────────
   const addGame = async (camp: Camp) => {
     const name = prompt(`ชื่อเกมในค่าย ${camp.name}`); if (!name) return;
-    try { await api.post('/bonustime/games', { campId: camp.id, name, provider: camp.name, order: camp.games.length }); load(); }
+    try { await api.post('/bonustime/games', { campId: camp.id, name, provider: camp.name, order: camp.games.length, ...coParam }); load(); }
     catch (e: any) { toast.error(e.response?.data?.message || 'เพิ่มเกมไม่สำเร็จ'); }
   };
   const updateGame = async (id: string, data: Partial<Game>) => {
-    try { await api.put(`/bonustime/games/${id}`, data); load(); }
+    try { await api.put(`/bonustime/games/${id}${coQS}`, data); load(); }
     catch (e: any) { toast.error(e.response?.data?.message || 'แก้ไขไม่สำเร็จ'); }
   };
   const delGame = async (g: Game) => {
     if (!confirm(`ลบเกม "${g.name}"?`)) return;
-    try { await api.delete(`/bonustime/games/${g.id}`); load(); }
+    try { await api.delete(`/bonustime/games/${g.id}${coQS}`); load(); }
     catch { toast.error('ลบไม่สำเร็จ'); }
   };
 
   const testSend = async () => {
     if (!testId.trim()) { toast.error('ใส่ LINE User ID ก่อนนะคะ'); return; }
     const t = toast.loading('กำลังส่ง...');
-    try { const r = await api.post('/bonustime/test-send', { lineUserId: testId.trim() }); toast.success(r.data.message, { id: t }); }
+    try { const r = await api.post('/bonustime/test-send', { lineUserId: testId.trim(), ...coParam }); toast.success(r.data.message, { id: t }); }
     catch (e: any) { toast.error(e.response?.data?.message || 'ส่งไม่สำเร็จ', { id: t }); }
   };
 
@@ -656,6 +690,25 @@ export default function BonusTimePage() {
             <input type="checkbox" checked={config.isActive} onChange={e => setCfg('isActive', e.target.checked)} />
             {config.isActive ? '✦ เปิดใช้งาน' : 'ปิดอยู่'}
           </label>
+        </div>
+
+        {/* ── Company Selector — เลือกบริษัทที่จะใช้งาน BONUS TIME ── */}
+        <div className="bt-co-wrap">
+          <span className="bt-co-lbl">🏢 บริษัทที่ใช้งาน</span>
+          <select
+            className="bt-co-select"
+            value={companyId}
+            onChange={e => switchCompany(e.target.value)}
+          >
+            {companies.length === 0 && <option value="">— กำลังโหลดบริษัท... —</option>}
+            {companies.map(co => (
+              <option key={co.id} value={co.id}>{co.name}</option>
+            ))}
+          </select>
+          <div className="bt-co-hint">
+            แต่ละบริษัทมี BONUS TIME แยกกัน (ค่ายเกม/เกม/คีย์เวิร์ด/เปิด-ปิด ของใครของมัน) — เลือกบริษัทแล้วตั้งค่าได้เลย
+            บอทจะโชว์การ์ดของบริษัทที่ผูกกับ LINE OA นั้นๆ อัตโนมัติ
+          </div>
         </div>
 
         {/* Stats + seed + preview */}

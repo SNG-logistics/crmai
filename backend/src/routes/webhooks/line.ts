@@ -19,14 +19,15 @@ const router = Router();
 // ⚡ BONUS TIME helpers
 // ════════════════════════════════════════════════════════════════════════════
 
-// โหลด config ของบริษัท — คืน null ถ้าปิดใช้งาน/ไม่มี
-// ⚠️ fallback: conversation เก่าอาจไม่มี companyId หรือบริษัทนั้นยังไม่ได้ตั้ง config
-//    → ใช้ config ตัวแรกที่เปิดใช้งานของ tenant แทน (จะได้ไม่ "เงียบ" ใส่ลูกค้า)
+// โหลด config ของบริษัท — เคารพการตั้งค่า per-company:
+//   • บริษัทมี config และเปิด → ใช้ของบริษัทนั้น
+//   • บริษัทมี config แต่ "ปิด" → คืน null (แอดมินตั้งใจปิด บริษัทนี้ห้ามโชว์)
+//   • บริษัทไม่มี config เลย (ห้องเก่า/ยังไม่ตั้ง) → fallback ใช้ config ที่เปิดตัวแรกของ tenant
 async function loadBonusConfig(companyId: string | null | undefined, tenantId?: string): Promise<any | null> {
   try {
     if (companyId) {
       const cfg = await prisma.bonusTimeConfig.findUnique({ where: { companyId } });
-      if (cfg && cfg.isActive) return cfg;
+      if (cfg) return cfg.isActive ? cfg : null; // มี config → เคารพสวิตช์เปิด/ปิดของบริษัทนั้น
     }
     if (tenantId) {
       const cfg = await prisma.bonusTimeConfig.findFirst({
