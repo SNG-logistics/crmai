@@ -150,58 +150,58 @@ async function handleLineWebhook(req: Request, res: Response) {
   const companyId = (req.params as any).companyId || null;
 
   try {
-    let channelConfig = await getChannelConfig(tenantId, 'line', companyId);
+    const rawBody = req.body as Buffer;
+    const signature = req.headers['x-line-signature'] as string;
+    const devBypass = process.env.NODE_ENV === 'development' && req.headers['x-test-bypass'] === 'true';
 
-    if (!channelConfig || !channelConfig.isActive) {
+    // โหลด LINE config ทั้งหมดของ tenant (active)
+    const allConfigs = await prisma.channelConfig.findMany({
+      where: { tenantId, channel: 'line', isActive: true },
+    });
+    if (!allConfigs.length) {
       console.warn(`LINE: no active config for tenant=${tenantId}`);
       return res.status(200).json({ status: 'ok' });
     }
+    const parseCfg = (cc: any) => {
+      let c = cc.config;
+      if (typeof c === 'string') { try { c = JSON.parse(c); } catch { c = {}; } }
+      return c || {};
+    };
 
-    let config: any = channelConfig.config;
-    if (typeof config === 'string') {
-      try { config = JSON.parse(config); } catch { config = {}; }
+    // ─── เลือก config ของ OA ที่ส่งมา (deterministic) ──────────────────────────
+    let channelConfig: any = null;
+    let config: any = null;
+
+    // 1) ถ้า URL ระบุ companyId → ใช้ config ของบริษัทนั้นตรงๆ
+    if (companyId) {
+      const byUrl = allConfigs.find((cc: any) => cc.companyId === companyId);
+      if (byUrl) { channelConfig = byUrl; config = parseCfg(byUrl); }
     }
-    let { channelSecret, accessToken } = config;
 
-    if (!channelSecret || !accessToken) {
-      console.error(`LINE: missing secret/token for tenant=${tenantId}`);
-      return res.status(200).json({ status: 'ok' });
-    }
-
-    const rawBody = req.body as Buffer;
-    const signature = req.headers['x-line-signature'] as string;
-
-    if (process.env.NODE_ENV !== 'development' || req.headers['x-test-bypass'] !== 'true') {
-      if (!signature) {
-        return res.status(200).json({ status: 'ok' });
-      }
-
-      if (!verifyLineSignature(rawBody, signature, channelSecret)) {
-        // ⚠️ secret ของ config ที่เดาไว้ไม่ตรง — tenant มีหลาย OA (หลายบริษัท)
-        //    ลองเช็คกับ "ทุก" LINE config ของ tenant แล้วใช้ตัวที่ signature ตรง
-        //    (เดิมตีทิ้งเลย → แชทจาก OA อื่นหายเงียบ ไม่เข้า CRM บอทไม่ตอบ)
-        const allConfigs = await prisma.channelConfig.findMany({
-          where: { tenantId, channel: 'line', isActive: true },
+    // 2) เลือกด้วย signature — จับทุกตัวที่ secret ตรง แล้ว "เลือกตัวที่ผูกบริษัทก่อน"
+    //    ⭐ กัน config ผี (ไม่มีบริษัท แต่ secret ซ้ำกับ OA จริง) มาแย่ง → เดิมทำให้แชท OneToBet ไปกอง databet
+    if (!channelConfig) {
+      if (!devBypass) {
+        if (!signature) return res.status(200).json({ status: 'ok' });
+        const matches = allConfigs.filter((cc: any) => {
+          const c = parseCfg(cc);
+          return c.channelSecret && verifyLineSignature(rawBody, signature, c.channelSecret);
         });
-        let matched: any = null;
-        for (const cc of allConfigs) {
-          let c: any = cc.config;
-          if (typeof c === 'string') { try { c = JSON.parse(c); } catch { c = {}; } }
-          if (c.channelSecret && verifyLineSignature(rawBody, signature, c.channelSecret)) {
-            matched = { row: cc, cfg: c };
-            break;
-          }
-        }
-        if (!matched) {
+        if (!matches.length) {
           console.warn(`LINE: signature mismatch (all ${allConfigs.length} configs) tenant=${tenantId}`);
           return res.status(200).json({ status: 'ok' });
         }
-        console.log(`LINE: signature matched via fallback config company=${matched.row.companyId || 'default'}`);
-        channelConfig = matched.row;
-        config = matched.cfg;
-        channelSecret = config.channelSecret;
-        accessToken = config.accessToken;
+        const best = matches.find((cc: any) => !!cc.companyId) || matches[0];
+        channelConfig = best; config = parseCfg(best);
+      } else {
+        channelConfig = allConfigs[0]; config = parseCfg(allConfigs[0]);
       }
+    }
+
+    const accessToken = config.accessToken;
+    if (!accessToken) {
+      console.error(`LINE: missing token for tenant=${tenantId} company=${channelConfig.companyId || '((none))'}`);
+      return res.status(200).json({ status: 'ok' });
     }
 
     const body = JSON.parse(rawBody.toString('utf-8'));
@@ -214,10 +214,11 @@ async function handleLineWebhook(req: Request, res: Response) {
 
     // ตอบ 200 ก่อน แล้วค่อย process
     res.status(200).json({ status: 'ok' });
-    console.log(`LINE: tenant=${tenantId} events=${events.length}`);
+    const oaCompanyId = companyId || channelConfig.companyId || null;
+    console.log(`LINE: tenant=${tenantId} events=${events.length} → company=${oaCompanyId || '((not-linked))'}`);
 
     for (const event of events) {
-      await processLineEvent(tenantId, event, accessToken, companyId || (channelConfig as any).companyId || null);
+      await processLineEvent(tenantId, event, accessToken, oaCompanyId);
     }
 
     return;
