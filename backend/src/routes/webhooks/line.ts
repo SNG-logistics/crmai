@@ -96,11 +96,10 @@ async function sendBonusMessages(ctx: BonusCtx, messages: any[]) {
 }
 
 // ส่งเมนูค่ายเกม — คืน false ถ้ายังไม่มีค่าย (ให้ flow ปกติทำงานต่อ)
-// ⚠️ แยกต่อบริษัทเด็ดขาด: ใช้เฉพาะค่ายของบริษัทเจ้าของ config เท่านั้น ไม่หยิบข้ามบริษัท
+// ⚡ ค่าย/เกม = SHARED ทั้ง tenant (เพิ่มครั้งเดียวใช้ได้ทุกเว็บ) — ส่วนเปิด/ปิดคุมที่ checklist บริษัท
 async function sendBonusMenu(ctx: BonusCtx): Promise<boolean> {
-  const campCompanyId = ctx.config?.companyId || ctx.conversation.companyId;
   const camps = await prisma.bonusTimeCamp.findMany({
-    where: { companyId: campCompanyId, isActive: true },
+    where: { tenantId: ctx.tenantId, isActive: true },
     orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
   });
   if (!camps.length) return false;
@@ -128,7 +127,7 @@ async function handleBonusPostback(tenantId: string, event: any, userId: string,
   const parsed = parseBonusPostback(event.postback?.data);
   if (!parsed) return; // postback อื่น — ไม่เกี่ยวกับ bonustime
   const { contact, conversation } = await resolveLineConvo(tenantId, userId, profile, companyIdHint);
-  const config = await loadBonusConfig(conversation.companyId, tenantId);
+  const config = await loadBonusConfig(companyIdHint, tenantId);
   if (!config) return;
   const ctx: BonusCtx = { tenantId, conversation, contact, userId, replyToken: event.replyToken || null, accessToken, config };
   if (parsed.action === 'menu') await sendBonusMenu(ctx);
@@ -751,8 +750,9 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
   // ════════════════════════════════════════════════════════════════════════════
   if (normalized.messageType !== 'text') return;
 
-  // ⚡ BONUS TIME — โหลด config ครั้งเดียว (ใช้ทั้ง exemption, fast-path และ AI-token)
-  const btConfig = await loadBonusConfig(conversation.companyId, tenantId);
+  // ⚡ BONUS TIME — key ตาม "บริษัทของ OA ที่ลูกค้าทัก" (companyIdHint)
+  //    OA ยังไม่ต่อบริษัท (companyIdHint ว่าง) → btConfig=null → ไม่ส่ง bonustime เลย (ไม่ไป databet)
+  const btConfig = await loadBonusConfig(companyIdHint, tenantId);
   // คำถามเกี่ยวกับเกมแตก / bonustime / อัตราชนะ → "ตอบเสมอ" ไม่นับ repeat-abuse ไม่ handoff
   const isGameQuery = isHotGamesQuery(normalized.content) || (btConfig ? matchBonusTimeKeyword(normalized.content, btConfig) : false);
 

@@ -523,7 +523,7 @@ function CampDropdown({
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
-interface CompanyOpt { id: string; name: string; isActive?: boolean }
+interface CompanyOpt { id: string; name: string; enabled: boolean }
 
 export default function BonusTimePage() {
   const [config, setConfig] = useState<Config | null>(null);
@@ -537,16 +537,14 @@ export default function BonusTimePage() {
   const uploadRef = useRef<{ cb: (url: string) => void } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  // ── Company selector — เลือกว่ากำลังตั้งค่า BONUS TIME ของบริษัทไหน ──
+  // ── รายชื่อบริษัท + ติ๊กว่าบริษัทไหนให้ใช้ BONUS TIME (ค่าย/เกม shared ทั้งหมด) ──
   const [companies, setCompanies] = useState<CompanyOpt[]>([]);
-  const [companyId, setCompanyId] = useState<string>('');   // '' = default บริษัทแรก
-  const coQS = companyId ? `?companyId=${companyId}` : '';
-  const coParam = companyId ? { companyId } : {};
+  const coParam = {}; // ค่าย/เกม shared — ไม่ต้องส่ง companyId
+  const coQS = '';
 
-  const load = async (cid?: string) => {
-    const q = (cid ?? companyId) ? `?companyId=${cid ?? companyId}` : '';
+  const load = async () => {
     try {
-      const r = await api.get(`/bonustime${q}`);
+      const r = await api.get('/bonustime');
       const cfg = r.data.config;
       setConfig({
         isActive: cfg.isActive, headerTitle: cfg.headerTitle, headerSubtitle: cfg.headerSubtitle,
@@ -556,30 +554,23 @@ export default function BonusTimePage() {
         liveJitter: cfg.liveJitter, accent: cfg.accent,
       });
       setCamps(r.data.camps || []);
+      setCompanies(r.data.companies || []);
       setDefaultKeywords(r.data.defaultKeywords || []);
-      // sync companyId ที่ backend เลือกให้ (กรณีเปิดหน้าครั้งแรกไม่ได้ระบุ)
-      if (!cid && !companyId && r.data.companyId) setCompanyId(r.data.companyId);
     } catch (e: any) {
       toast.error(e.response?.data?.message || 'โหลดข้อมูลไม่สำเร็จ');
     } finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
 
-  // โหลดรายชื่อบริษัท + จำบริษัทที่เลือกล่าสุดไว้
-  useEffect(() => {
-    api.get('/companies').then(r => setCompanies(r.data.companies || [])).catch(() => {});
+  // ติ๊ก/เอาติ๊กออก ให้บริษัทใช้ BONUS TIME
+  const toggleCompany = async (id: string, enabled: boolean) => {
+    setCompanies(cs => cs.map(c => c.id === id ? { ...c, enabled } : c)); // optimistic
     try {
-      const saved = localStorage.getItem('bt-company');
-      if (saved) { setCompanyId(saved); setLoading(true); load(saved); }
-    } catch {}
-  }, []);
-
-  const switchCompany = (id: string) => {
-    setCompanyId(id);
-    setSelectedCampId(null);
-    setLoading(true);
-    try { localStorage.setItem('bt-company', id); } catch {}
-    load(id);
+      await api.post('/bonustime/company-toggle', { companyId: id, enabled });
+    } catch (e: any) {
+      setCompanies(cs => cs.map(c => c.id === id ? { ...c, enabled: !enabled } : c));
+      toast.error(e.response?.data?.message || 'บันทึกไม่สำเร็จ');
+    }
   };
 
   // ─── image upload ───────────────────────────────────────────────────────────
@@ -692,22 +683,27 @@ export default function BonusTimePage() {
           </label>
         </div>
 
-        {/* ── Company Selector — เลือกบริษัทที่จะใช้งาน BONUS TIME ── */}
-        <div className="bt-co-wrap">
-          <span className="bt-co-lbl">🏢 บริษัทที่ใช้งาน</span>
-          <select
-            className="bt-co-select"
-            value={companyId}
-            onChange={e => switchCompany(e.target.value)}
-          >
-            {companies.length === 0 && <option value="">— กำลังโหลดบริษัท... —</option>}
-            {companies.map(co => (
-              <option key={co.id} value={co.id}>{co.name}</option>
+        {/* ── Company Checklist — ติ๊กบริษัทที่ให้ใช้ BONUS TIME ── */}
+        <div className="bt-co-wrap" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
+          <span className="bt-co-lbl" style={{ marginBottom: 4 }}>✅ บริษัทที่ให้ใช้ BONUS TIME (ติ๊กเลือก)</span>
+          <div className="bt-co-hint" style={{ marginBottom: 10 }}>
+            ค่ายเกม/เกมทั้งหมดเป็น <b className="bt-gold">ชุดเดียวใช้ร่วมกันทุกเว็บ</b> — เพิ่มเกมครั้งเดียวพอ
+            ✦ ติ๊กบริษัทไหน = LINE ของบริษัทนั้นถามหา BONUSTIME แล้วการ์ดขึ้น ✦ ไม่ติ๊ก = LINE นั้นไม่ใช้ (บอทไม่ส่งการ์ด)
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(200px,1fr))', gap: 8 }}>
+            {companies.length === 0 ? (
+              <div style={{ color: '#8a7a4e', fontSize: '.8rem' }}>ยังไม่มีบริษัท — เพิ่มบริษัทได้ที่ ตั้งค่า → บริษัท</div>
+            ) : companies.map(co => (
+              <label key={co.id}
+                style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 12px', borderRadius: 10, cursor: 'pointer',
+                  border: `1px solid ${co.enabled ? 'rgba(255,215,0,.55)' : 'rgba(255,215,0,.15)'}`,
+                  background: co.enabled ? 'linear-gradient(135deg,rgba(255,215,0,.14),rgba(184,134,11,.1))' : 'rgba(255,255,255,.02)' }}>
+                <input type="checkbox" checked={co.enabled} onChange={e => toggleCompany(co.id, e.target.checked)}
+                  style={{ width: 17, height: 17, accentColor: '#e8b923', flexShrink: 0 }} />
+                <span style={{ fontWeight: 700, fontSize: '.86rem', color: co.enabled ? '#ffe9a8' : '#b7a578' }}>{co.name}</span>
+                {co.enabled && <span style={{ marginLeft: 'auto', fontSize: '.62rem', color: '#4ade80', fontWeight: 800 }}>● เปิด</span>}
+              </label>
             ))}
-          </select>
-          <div className="bt-co-hint">
-            แต่ละบริษัทมี BONUS TIME แยกกัน (ค่ายเกม/เกม/คีย์เวิร์ด/เปิด-ปิด ของใครของมัน) — เลือกบริษัทแล้วตั้งค่าได้เลย
-            บอทจะโชว์การ์ดของบริษัทที่ผูกกับ LINE OA นั้นๆ อัตโนมัติ
           </div>
         </div>
 

@@ -39,19 +39,46 @@ async function getOrCreateConfig(tenantId: string, companyId: string) {
   return cfg;
 }
 
-// ─── GET /api/bonustime — config + camps (พร้อม games) ────────────────────────
+// ─── GET /api/bonustime — config + camps (SHARED ทั้ง tenant) + รายชื่อบริษัท(ติ๊ก) ─────
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const companyId = await resolveCompanyId(req);
-    const config = await getOrCreateConfig(req.tenantId!, companyId);
+    const tenantId = req.tenantId!;
+    const companyId = await resolveCompanyId(req);          // config หลัก (ข้อความ/คีย์เวิร์ด) ที่หน้าใช้แก้
+    const config = await getOrCreateConfig(tenantId, companyId);
+    // ค่าย/เกม = shared: ดึงทั้ง tenant (เพิ่มครั้งเดียวใช้ได้ทุกเว็บ)
     const camps = await prisma.bonusTimeCamp.findMany({
-      where: { companyId },
+      where: { tenantId },
       orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
       include: { games: { orderBy: [{ order: 'asc' }, { createdAt: 'asc' }] } },
     });
-    return res.json({ success: true, companyId, config, camps, defaultKeywords: DEFAULT_BONUS_KEYWORDS });
+    // รายชื่อบริษัท + สถานะ "ติ๊กเปิด BONUS TIME" (bonusTimeConfig.isActive ต่อบริษัท)
+    const companies = await prisma.company.findMany({
+      where: { tenantId }, orderBy: { createdAt: 'asc' },
+      select: { id: true, name: true, isActive: true },
+    });
+    const cfgs = await prisma.bonusTimeConfig.findMany({ where: { tenantId }, select: { companyId: true, isActive: true } });
+    const enabledMap: Record<string, boolean> = {};
+    cfgs.forEach(c => { if (c.companyId) enabledMap[c.companyId] = c.isActive; });
+    const companyList = companies.map(co => ({ id: co.id, name: co.name, enabled: !!enabledMap[co.id] }));
+    return res.json({ success: true, companyId, config, camps, companies: companyList, defaultKeywords: DEFAULT_BONUS_KEYWORDS });
   } catch (e: any) {
     console.error('BonusTime GET error:', e);
+    return res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// ─── POST /api/bonustime/company-toggle — ติ๊ก/เอาติ๊กออก ให้บริษัทใช้ BONUS TIME ────
+router.post('/company-toggle', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.tenantId!;
+    const { companyId, enabled } = req.body || {};
+    if (!companyId) return res.status(400).json({ success: false, message: 'ต้องระบุ companyId' });
+    const co = await prisma.company.findFirst({ where: { id: companyId, tenantId }, select: { id: true } });
+    if (!co) return res.status(404).json({ success: false, message: 'ไม่พบบริษัท' });
+    await getOrCreateConfig(tenantId, companyId);
+    await prisma.bonusTimeConfig.update({ where: { companyId }, data: { isActive: !!enabled } });
+    return res.json({ success: true, companyId, enabled: !!enabled });
+  } catch (e: any) {
     return res.status(500).json({ success: false, message: e.message });
   }
 });
