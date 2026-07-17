@@ -131,7 +131,9 @@ export default function LinksPage() {
   };
 
   const copyLink = (slug: string) => {
-    const url = `${window.location.protocol}//${window.location.hostname}:3001/${slug}`;
+    // ใช้ origin ตรงๆ (https://vrc2.cc/slug) — ห้ามใส่ :3001 เพราะพอร์ตนั้นไม่ได้เปิดออกเน็ต
+    // Caddy + fallback rewrite ใน next.config.mjs จะพา request ไปถึง backend เอง
+    const url = `${window.location.origin}/${slug}`;
     navigator.clipboard.writeText(url);
     toast.success('คัดลอกลิงก์แล้ว! 📋');
   };
