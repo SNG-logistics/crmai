@@ -161,7 +161,7 @@ async function handleLineWebhook(req: Request, res: Response) {
   const companyId = (req.params as any).companyId || null;
 
   try {
-    const channelConfig = await getChannelConfig(tenantId, 'line', companyId);
+    let channelConfig = await getChannelConfig(tenantId, 'line', companyId);
 
     if (!channelConfig || !channelConfig.isActive) {
       console.warn(`LINE: no active config for tenant=${tenantId}`);
@@ -172,7 +172,7 @@ async function handleLineWebhook(req: Request, res: Response) {
     if (typeof config === 'string') {
       try { config = JSON.parse(config); } catch { config = {}; }
     }
-    const { channelSecret, accessToken } = config;
+    let { channelSecret, accessToken } = config;
 
     if (!channelSecret || !accessToken) {
       console.error(`LINE: missing secret/token for tenant=${tenantId}`);
@@ -188,8 +188,30 @@ async function handleLineWebhook(req: Request, res: Response) {
       }
 
       if (!verifyLineSignature(rawBody, signature, channelSecret)) {
-        console.warn(`LINE: signature mismatch tenant=${tenantId}`);
-        return res.status(200).json({ status: 'ok' });
+        // ⚠️ secret ของ config ที่เดาไว้ไม่ตรง — tenant มีหลาย OA (หลายบริษัท)
+        //    ลองเช็คกับ "ทุก" LINE config ของ tenant แล้วใช้ตัวที่ signature ตรง
+        //    (เดิมตีทิ้งเลย → แชทจาก OA อื่นหายเงียบ ไม่เข้า CRM บอทไม่ตอบ)
+        const allConfigs = await prisma.channelConfig.findMany({
+          where: { tenantId, channel: 'line', isActive: true },
+        });
+        let matched: any = null;
+        for (const cc of allConfigs) {
+          let c: any = cc.config;
+          if (typeof c === 'string') { try { c = JSON.parse(c); } catch { c = {}; } }
+          if (c.channelSecret && verifyLineSignature(rawBody, signature, c.channelSecret)) {
+            matched = { row: cc, cfg: c };
+            break;
+          }
+        }
+        if (!matched) {
+          console.warn(`LINE: signature mismatch (all ${allConfigs.length} configs) tenant=${tenantId}`);
+          return res.status(200).json({ status: 'ok' });
+        }
+        console.log(`LINE: signature matched via fallback config company=${matched.row.companyId || 'default'}`);
+        channelConfig = matched.row;
+        config = matched.cfg;
+        channelSecret = config.channelSecret;
+        accessToken = config.accessToken;
       }
     }
 
