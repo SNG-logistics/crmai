@@ -521,30 +521,8 @@ async function hasImageInConversation(conversationId: string): Promise<boolean> 
 }
 
 // ─── Promotion Query Detector ─────────────────────────────────────────────────
-const PROMOTION_KEYWORDS = [
-  'โปร', 'โปรโมชั่น', 'โปรโมชน', 'โปรชั่น', 'promotion', 'bonus', 'โบนัส',
-  'รับโปร', 'มีโปร', 'โปรอะไร', 'โปรไหน', 'โปรดีไหม',
-  'สมัครใหม่', 'สมาชิกใหม่', 'สมาชิกได้อะไร',
-  'รับโบนัส', 'โบนัสสมาชิก', 'โบนัสใหม่',
-  'เทิร์น', 'ยอดเทิร์น', 'ถอนได้เท่าไหร่', 'ถอนได้เท่าไร',
-  'ถอนสูงสุด', 'ถอนได้กี่บาท', 'ถอนได้กี่เท่า',
-  'ฝาก 100', 'ฝาก 200', 'ฝาก 300',
-  'ฝากแล้วได้อะไร', 'ฝากแล้วรับอะไร', 'ฝากเท่าไหร่', 'ฝากเท่าไร',
-  'รับเพิ่มเท่าไหร่', 'ได้เพิ่มเท่าไหร่', 'ได้กี่บาท',
-  'เงื่อนไข', 'ข้อกำหนด', 'กฎ',
-];
-
-function isPromotionQuery(text: string): boolean {
-  const t = text.toLowerCase();
-  return PROMOTION_KEYWORDS.some(kw => t.includes(kw));
-}
-
-const PROMOTION_REPLY = `📌 โปรสมาชิกใหม่ รับโบนัส 50% ค่ะ
-• ฝาก 100 → รับเพิ่ม 50 บาท (รวม 150)
-• ฝาก 200 → รับเพิ่ม 100 บาท (รวม 300)
-• ฝาก 300 → รับเพิ่ม 150 บาท (รวม 450)
-🔄 เทิร์น 3 เท่าของ (ยอดฝาก+โบนัส) ถึงจะถอนได้นะคะ
-💰 ถอนได้สูงสุด 10 เท่าของ (ยอดฝาก+โบนัส) ค่ะ`;
+//  (เอาออกแล้ว) เดิมดักคีย์เวิร์ดโปรแล้วตอบข้อความฮาร์ดโค้ด 50% โดยไม่ผ่าน AI
+//  ตอนนี้คำถามโปรจะไหลไปหา AI (processBotMessage) → ดึงโปรจาก "ระบบ" (businessInfo ต่อบริษัท)
 
 
 // ─── Main Event Processor ─────────────────────────────────────────────────────
@@ -875,28 +853,8 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     return;
   }
 
-  // ✅ ตรวจสอบ: ลูกค้าถามโปรโมชั่น → ตอบโปรข้อมูลจริงทันที ไม่ผ่าน AI
-  if (isPromotionQuery(normalized.content)) {
-    const reply = PROMOTION_REPLY;
-    try {
-      if (normalized.replyToken) {
-        await sendLineReply(normalized.replyToken, [lineTextMessage(reply)], accessToken);
-      } else {
-        await sendLinePush(userId, [lineTextMessage(reply)], accessToken);
-      }
-      const dbMsg = await prisma.message.create({
-        data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: reply },
-      });
-      emitToTenant(tenantId, 'new_message', {
-        conversationId: conversation.id,
-        message: { ...dbMsg, senderType: 'bot' },
-        contact, channel: 'line',
-      });
-    } catch (e: any) {
-      console.warn(`[LINE Bot] promotion reply failed:`, e.message);
-    }
-    return; // บอทตอบเอง ไม่ handoff
-  }
+  // 💡 โปรโมชั่น: ไม่ดักตอบด้วยข้อความฮาร์ดโค้ดแล้ว — ปล่อยให้ไหลไปหา AI (processBotMessage)
+  //    ซึ่งจะดึงโปร/ข้อมูลธุรกิจจาก "ระบบ" (ตั้งค่าต่อบริษัทในหน้า AI Bot → businessInfo)
 
   // ✅ ตรวจสอบ: ลูกค้าหมดเงิน / ไม่มีเงิน → ตอบใจเย็นๆ ชวนพักก่อน
   if (isOutOfMoney(normalized.content)) {

@@ -196,7 +196,7 @@ export default function BotPage() {
               <label className="label">📋 ข้อมูลธุรกิจ (ข้อเท็จจริงที่ให้บอทใช้ตอบ — โปรโมชั่น เวลาทำการ ขั้นตอนฝาก-ถอน ฯลฯ)</label>
               <textarea className="input" rows={6} value={settings.businessInfo} onChange={e => setS('businessInfo', e.target.value)}
                 placeholder={'ใส่ข้อมูลจริงของบริษัทนี้ บอทจะตอบตามนี้เท่านั้น ไม่แต่งเอง เช่น' + String.fromCharCode(10) + '- โปรสมาชิกใหม่ ฝาก 100 รับ 150' + String.fromCharCode(10) + '- ฝากขั้นต่ำ 100 บาท ถอนขั้นต่ำ 300 บาท' + String.fromCharCode(10) + '- เวลาทำการแอดมิน 9:00-24:00'} />
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>⚠️ ถ้าเว้นว่าง ระบบจะใช้ข้อมูลโปรโมชั่นกลางเดิม — แนะนำให้กรอกของบริษัทนี้เอง</div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>⚠️ บอทจะใช้เฉพาะโปร/ข้อมูลที่กรอกตรงนี้เท่านั้น (ไม่ปั้นโปรเอง) — ถ้าเว้นว่าง บอทจะไม่บอกโปรใดๆ กับลูกค้า ต้องกรอกโปรของบริษัทนี้บอทถึงจะเอาไปตอบ</div>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
