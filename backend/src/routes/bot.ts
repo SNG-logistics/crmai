@@ -3,6 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
+import sharp from 'sharp';
 import prisma from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
 import { analyzeKnowledgeImage, generateAIResponse, parseBotSettings, processBotMessage } from '../services/ai.service';
@@ -158,12 +159,13 @@ router.post('/knowledge', async (req: Request, res: Response) => {
 
 // POST /api/bot/knowledge/visual — เพิ่มความรู้จากรูป + ข้อความ (เพิ่มได้ไม่จำกัดจำนวน)
 router.post('/knowledge/visual', acceptVisualKnowledgeUpload, async (req: Request, res: Response) => {
-  let savedImagePath = '';
+  const savedImagePaths: string[] = [];
   try {
     const companyId = await resolveCompanyId(req);
     const bot = await ensureBotConfig(req.tenantId!, companyId);
     const sourceText = cleanText(req.body?.sourceText, 12000);
     const category = cleanText(req.body?.category, 100) || 'visual';
+    const sendImage = req.body?.sendImage !== 'false';
     if (!req.file && !sourceText) {
       return res.status(400).json({ success: false, message: 'กรุณาแนบรูปหรือใส่ข้อความความรู้' });
     }
@@ -182,18 +184,53 @@ router.post('/knowledge/visual', acceptVisualKnowledgeUpload, async (req: Reques
         };
 
     let imageUrl: string | null = null;
+    let imagePreviewUrl: string | null = null;
     if (req.file) {
-      const extensionByMime: Record<string, string> = {
-        'image/jpeg': '.jpg',
-        'image/png': '.png',
-        'image/webp': '.webp',
-      };
       const tenantDirectory = path.join(VISUAL_KNOWLEDGE_DIR, req.tenantId!);
       await fs.promises.mkdir(tenantDirectory, { recursive: true });
-      const filename = `${Date.now()}-${randomUUID()}${extensionByMime[req.file.mimetype] || '.jpg'}`;
-      savedImagePath = path.join(tenantDirectory, filename);
-      await fs.promises.writeFile(savedImagePath, req.file.buffer);
+      const fileId = `${Date.now()}-${randomUUID()}`;
+      const filename = `${fileId}.jpg`;
+      const previewFilename = `${fileId}-preview.jpg`;
+      const imagePath = path.join(tenantDirectory, filename);
+      const previewPath = path.join(tenantDirectory, previewFilename);
+
+      // LINE รับเฉพาะ JPEG/PNG ผ่าน HTTPS และ preview ต้องมีขนาดเล็ก
+      // จึง normalize รูปทุกชนิด (รวม WEBP) เป็น JPEG สองขนาดตั้งแต่ตอนบันทึก
+      let normalizedImage = await sharp(req.file.buffer, { limitInputPixels: 40_000_000 })
+        .rotate()
+        .resize({ width: 2400, height: 2400, fit: 'inside', withoutEnlargement: true })
+        .flatten({ background: '#ffffff' })
+        .jpeg({ quality: 88, progressive: true })
+        .toBuffer();
+      if (normalizedImage.length > 9 * 1024 * 1024) {
+        normalizedImage = await sharp(req.file.buffer, { limitInputPixels: 40_000_000 })
+          .rotate()
+          .resize({ width: 1800, height: 1800, fit: 'inside', withoutEnlargement: true })
+          .flatten({ background: '#ffffff' })
+          .jpeg({ quality: 78, progressive: true })
+          .toBuffer();
+      }
+      let previewImage = await sharp(req.file.buffer, { limitInputPixels: 40_000_000 })
+        .rotate()
+        .resize({ width: 960, height: 960, fit: 'inside', withoutEnlargement: true })
+        .flatten({ background: '#ffffff' })
+        .jpeg({ quality: 70, progressive: true })
+        .toBuffer();
+      if (previewImage.length > 900 * 1024) {
+        previewImage = await sharp(req.file.buffer, { limitInputPixels: 40_000_000 })
+          .rotate()
+          .resize({ width: 720, height: 720, fit: 'inside', withoutEnlargement: true })
+          .flatten({ background: '#ffffff' })
+          .jpeg({ quality: 58, progressive: true })
+          .toBuffer();
+      }
+
+      await fs.promises.writeFile(imagePath, normalizedImage);
+      savedImagePaths.push(imagePath);
+      await fs.promises.writeFile(previewPath, previewImage);
+      savedImagePaths.push(previewPath);
       imageUrl = `/uploads/knowledge/${req.tenantId!}/${filename}`;
+      imagePreviewUrl = `/uploads/knowledge/${req.tenantId!}/${previewFilename}`;
     }
 
     const analysisParts = [
@@ -216,13 +253,15 @@ router.post('/knowledge/visual', acceptVisualKnowledgeUpload, async (req: Reques
         sourceType: 'visual',
         sourceText: sourceText || null,
         imageUrl,
+        imagePreviewUrl,
         imageAnalysis: imageAnalysis || null,
+        sendImage,
         isActive: true,
       },
     });
     return res.status(201).json({ success: true, item });
   } catch (error: any) {
-    if (savedImagePath) {
+    for (const savedImagePath of savedImagePaths) {
       await fs.promises.unlink(savedImagePath).catch(() => undefined);
     }
     console.error('[Visual Knowledge] create failed:', error);
@@ -243,11 +282,12 @@ router.put('/knowledge/:id', async (req: Request, res: Response) => {
       select: { id: true },
     });
     if (!existing) return res.status(404).json({ success: false, message: 'ไม่พบรายการความรู้ของบริษัทนี้' });
-    const data: { question?: string; answer?: string; category?: string; isActive?: boolean } = {};
+    const data: { question?: string; answer?: string; category?: string; isActive?: boolean; sendImage?: boolean } = {};
     if (req.body?.question !== undefined) data.question = cleanText(req.body.question, 1000);
     if (req.body?.answer !== undefined) data.answer = cleanText(req.body.answer, 30000);
     if (req.body?.category !== undefined) data.category = cleanText(req.body.category, 100) || 'general';
     if (typeof req.body?.isActive === 'boolean') data.isActive = req.body.isActive;
+    if (typeof req.body?.sendImage === 'boolean') data.sendImage = req.body.sendImage;
     const item = await prisma.knowledgeBase.update({ where: { id: existing.id }, data });
     return res.json({ success: true, item });
   } catch { return res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' }); }
@@ -260,14 +300,16 @@ router.delete('/knowledge/:id', async (req: Request, res: Response) => {
     if (!bot) return res.status(404).json({ success: false, message: 'ไม่พบการตั้งค่า AI ของบริษัทนี้' });
     const item = await prisma.knowledgeBase.findFirst({
       where: { id: req.params.id, botConfigId: bot.id },
-      select: { id: true, imageUrl: true },
+      select: { id: true, imageUrl: true, imagePreviewUrl: true },
     });
     if (!item) return res.status(404).json({ success: false, message: 'ไม่พบรายการความรู้ของบริษัทนี้' });
     await prisma.knowledgeBase.delete({ where: { id: item.id } });
-    if (item.imageUrl?.startsWith('/uploads/knowledge/')) {
-      const filePath = path.resolve(process.cwd(), item.imageUrl.replace(/^\/+/, ''));
-      if (filePath.startsWith(VISUAL_KNOWLEDGE_DIR + path.sep)) {
-        await fs.promises.unlink(filePath).catch(() => undefined);
+    for (const storedUrl of [item.imageUrl, item.imagePreviewUrl]) {
+      if (storedUrl?.startsWith('/uploads/knowledge/')) {
+        const filePath = path.resolve(process.cwd(), storedUrl.replace(/^\/+/, ''));
+        if (filePath.startsWith(VISUAL_KNOWLEDGE_DIR + path.sep)) {
+          await fs.promises.unlink(filePath).catch(() => undefined);
+        }
       }
     }
     return res.json({ success: true });
@@ -286,7 +328,13 @@ router.post('/test', async (req: Request, res: Response) => {
       companyId,
       { channel: ['line', 'whatsapp', 'telegram'].includes(channel) ? channel : undefined },
     );
-    return res.json({ success: true, reply: result.reply });
+    return res.json({
+      success: true,
+      reply: result.reply,
+      imageUrl: result.imageUrl,
+      imagePreviewUrl: result.imagePreviewUrl,
+      knowledgeId: result.knowledgeId,
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }

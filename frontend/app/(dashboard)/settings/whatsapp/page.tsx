@@ -80,6 +80,7 @@ export default function WhatsAppSettingsPage() {
   const [aiSaving, setAiSaving] = useState(false);
   const [testMsg, setTestMsg] = useState('');
   const [testReply, setTestReply] = useState('');
+  const [testImage, setTestImage] = useState('');
   const [testing, setTesting] = useState(false);
 
   // ── Load companies ───────────────────────────────────────────────────────────
@@ -163,7 +164,7 @@ export default function WhatsAppSettingsPage() {
     setQrMap({}); setQrForAccount(null);
     loadAccounts(companyId);
     loadAi(companyId);
-    setTestReply(''); setTestMsg('');
+    setTestReply(''); setTestImage(''); setTestMsg('');
   }, [companyId, loadAccounts, loadAi]);
 
   // ── Real-time WhatsApp events (per account) ──────────────────────────────────
@@ -290,10 +291,11 @@ export default function WhatsAppSettingsPage() {
 
   const runTest = async () => {
     if (!testMsg.trim() || !companyId) return;
-    setTesting(true); setTestReply('');
+    setTesting(true); setTestReply(''); setTestImage('');
     try {
       const r = await api.post('/bot/test', { companyId, message: testMsg, channel: 'whatsapp' });
       setTestReply(r.data.reply || '(ไม่มีคำตอบ)');
+      setTestImage(r.data.imageUrl || '');
     } catch (e: any) {
       setTestReply('❌ ' + (e.response?.data?.message || 'เกิดข้อผิดพลาด'));
     } finally {
@@ -622,6 +624,7 @@ export default function WhatsAppSettingsPage() {
                     {testReply && (
                       <div style={{ marginTop: 14, padding: '12px 14px', background: 'var(--bg-tertiary)', borderRadius: 10, fontSize: '0.85rem', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                         <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 4 }}>🤖 AI ตอบ:</div>
+                        {testImage && <img src={testImage} alt="รูปความรู้ที่ AI จะส่ง" style={{ display: 'block', maxWidth: '100%', maxHeight: 260, objectFit: 'contain', borderRadius: 8, marginBottom: 8 }} />}
                         {testReply}
                       </div>
                     )}

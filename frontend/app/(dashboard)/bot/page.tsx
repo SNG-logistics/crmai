@@ -96,7 +96,7 @@ export default function BotPage() {
     setTestMsg('');
     try {
       const r = await api.post('/bot/test', { message: userMsg.content, history: testHistory, companyId });
-      setTestHistory(prev => [...prev, { role: 'assistant', content: r.data.reply }]);
+      setTestHistory(prev => [...prev, { role: 'assistant', content: r.data.reply, imageUrl: r.data.imageUrl }]);
     } finally { setTesting(false); }
   };
 
@@ -277,6 +277,7 @@ export default function BotPage() {
           {testHistory.map((m: any, i: number) => (
             <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
               <div style={{ maxWidth: '85%', padding: '8px 12px', borderRadius: 10, fontSize: '0.85rem', background: m.role === 'user' ? 'var(--teal-glow)' : 'var(--bg-tertiary)', border: '1px solid', borderColor: m.role === 'user' ? 'rgba(0,212,170,0.2)' : 'var(--border)' }}>
+                {m.imageUrl && <img src={m.imageUrl} alt="รูปความรู้ที่ AI จะส่ง" style={{ display: 'block', maxWidth: '100%', maxHeight: 220, objectFit: 'contain', borderRadius: 8, marginBottom: 8 }} />}
                 {m.content}
               </div>
             </div>

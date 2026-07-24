@@ -358,7 +358,9 @@ model KnowledgeBase {
   sourceType    String    @default("qa") // qa | visual
   sourceText    String? // ข้อความที่ผู้ดูแลกำกับรูป
   imageUrl      String? // รูปต้นฉบับใน /uploads/knowledge
+  imagePreviewUrl String? // รูป preview สำหรับ LINE (JPEG ไม่เกินข้อกำหนด)
   imageAnalysis String? // OCR/ข้อเท็จจริง/คำค้นที่ AI อ่านจากรูป
+  sendImage     Boolean   @default(true) // ส่งรูปต้นฉบับพร้อมคำตอบเมื่อรายการนี้ตรงคำถาม
   isActive      Boolean   @default(true)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

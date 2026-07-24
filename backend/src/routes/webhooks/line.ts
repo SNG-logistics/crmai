@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../../lib/prisma';
-import { verifyLineSignature, parseLineEvent, getLineProfile, sendLineReply, sendLinePush, lineTextMessage, lineBotReplyMessage, lineWelcomeMessage } from '../../services/line.service';
+import { verifyLineSignature, parseLineEvent, getLineProfile, sendLineReply, sendLinePush, lineTextMessage, lineImageMessage, lineBotReplyMessage, lineWelcomeMessage } from '../../services/line.service';
 import { processBotMessage, visionAssistReply } from '../../services/ai.service';
 import { checkRepeatAbuse, REPEAT_HANDOFF_REPLY } from '../../services/bot-guard';
 import { emitToTenant } from '../../lib/socket';
@@ -14,6 +14,27 @@ import {
 } from '../../services/bonustime.service';
 
 const router = Router();
+
+function requestPublicOrigin(req: Request): string | null {
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const forwardedHost = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  const isLocalHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(forwardedHost);
+  const protocol = forwardedProto || (isLocalHost ? req.protocol : 'https');
+  if (!forwardedHost || protocol !== 'https') return null;
+  return `${protocol}://${forwardedHost}`;
+}
+
+function publicKnowledgeImageUrl(publicOrigin: string | null, imageUrl?: string | null): string | null {
+  if (!imageUrl) return null;
+  try {
+    if (/^https:\/\//i.test(imageUrl)) return new URL(imageUrl).toString();
+    if (!publicOrigin || !imageUrl.startsWith('/uploads/knowledge/')) return null;
+    const url = new URL(imageUrl, publicOrigin);
+    return url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // ⚡ BONUS TIME helpers
@@ -215,10 +236,11 @@ async function handleLineWebhook(req: Request, res: Response) {
     // ตอบ 200 ก่อน แล้วค่อย process
     res.status(200).json({ status: 'ok' });
     const oaCompanyId = companyId || channelConfig.companyId || null;
+    const publicOrigin = requestPublicOrigin(req);
     console.log(`LINE: tenant=${tenantId} events=${events.length} → company=${oaCompanyId || '((not-linked))'}`);
 
     for (const event of events) {
-      await processLineEvent(tenantId, event, accessToken, oaCompanyId);
+      await processLineEvent(tenantId, event, accessToken, oaCompanyId, publicOrigin);
     }
 
     return;
@@ -291,7 +313,13 @@ async function hasImageInConversation(conversationId: string): Promise<boolean> 
 
 
 // ─── Main Event Processor ─────────────────────────────────────────────────────
-async function processLineEvent(tenantId: string, event: any, accessToken: string, companyIdHint?: string | null) {
+async function processLineEvent(
+  tenantId: string,
+  event: any,
+  accessToken: string,
+  companyIdHint?: string | null,
+  publicOrigin: string | null = null,
+) {
   const userId = event.source?.userId;
   if (!userId) return;
 
@@ -686,6 +714,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     // ═══ เรื่องสมัครสมาชิก — logic ตายตัว ไม่พึ่ง AI ═══
     //  ยังไม่มีข้อมูล → ส่งฟอร์ม ✅ ทั้งชุด | มีบางส่วน → ขอเฉพาะที่ขาด | ครบ → ทวนยืนยัน
     let reply: string;
+    let responseImage: { imageUrl: string; imagePreviewUrl?: string; knowledgeId?: string } | undefined;
     const shouldHandoff = false;
     if (isRegisterIntent(normalized.content) && !mightContainCustomerInfo(normalized.content)) {
       // ลูกค้า "ถามเรื่องสมัคร" (ยังไม่ได้ให้ข้อมูล) → ส่งฟอร์ม/ขอเฉพาะที่ขาด แบบตายตัว
@@ -710,6 +739,17 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
         { bonusTimeActive: !!btConfig, profileContext, channel: 'line' },
       );
       reply = r.reply;
+      const imageWasSentRecently = r.knowledgeId && history.some((message: any) => {
+        if (message.senderType !== 'bot' || Date.now() - new Date(message.createdAt).getTime() > 30 * 60 * 1000) return false;
+        try { return JSON.parse(message.metadata || '{}').knowledgeId === r.knowledgeId; } catch { return false; }
+      });
+      if (r.imageUrl && !imageWasSentRecently) {
+        responseImage = {
+          imageUrl: r.imageUrl,
+          imagePreviewUrl: r.imagePreviewUrl,
+          knowledgeId: r.knowledgeId,
+        };
+      }
       void r.shouldHandoff;
     }
 
@@ -726,15 +766,22 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     }
     // ตัดโทเคนออกก่อนส่ง (กันกรณีไม่มีค่าย/ตกหล่น)
     const cleanReply = reply.replace(/\[\[BONUSTIME\]\]/gi, '').trim() || 'ได้รับข้อความแล้วนะคะ 🙏';
+    const originalImageUrl = publicKnowledgeImageUrl(publicOrigin, responseImage?.imageUrl);
+    const previewImageUrl = publicKnowledgeImageUrl(publicOrigin, responseImage?.imagePreviewUrl) || originalImageUrl;
+    const outboundMessages = originalImageUrl
+      ? [lineImageMessage(originalImageUrl, previewImageUrl || undefined), lineBotReplyMessage(cleanReply)]
+      : [lineBotReplyMessage(cleanReply)];
 
-    console.log(`[LINE Bot] tenant=${tenantId} reply="${cleanReply.substring(0, 60)}" handoff=${shouldHandoff}`);
+    console.log(`[LINE Bot] tenant=${tenantId} reply="${cleanReply.substring(0, 60)}" image=${!!originalImageUrl} handoff=${shouldHandoff}`);
 
     let sent = false;
+    let sentWithImage = false;
 
     if (normalized.replyToken) {
       try {
-        await sendLineReply(normalized.replyToken, [lineBotReplyMessage(cleanReply)], accessToken);
+        await sendLineReply(normalized.replyToken, outboundMessages, accessToken);
         sent = true;
+        sentWithImage = !!originalImageUrl;
         console.log(`[LINE Bot] ✅ Reply sent via replyToken`);
       } catch (replyErr: any) {
         console.warn(`[LINE Bot] ⚠️ Reply API failed (${replyErr?.response?.data?.message || replyErr.message}), trying Push...`);
@@ -743,17 +790,42 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
 
     if (!sent) {
       try {
-        await sendLinePush(userId, [lineBotReplyMessage(cleanReply)], accessToken);
+        await sendLinePush(userId, outboundMessages, accessToken);
         sent = true;
+        sentWithImage = !!originalImageUrl;
         console.log(`[LINE Bot] ✅ Reply sent via Push API`);
       } catch (pushErr: any) {
-        console.error(`[LINE Bot] ❌ Push API also failed:`, pushErr?.response?.data || pushErr.message);
+        console.error(`[LINE Bot] ❌ Push API failed:`, pushErr?.response?.data || pushErr.message);
+        // รูปมีปัญหาหรือ LINE ดึงรูปไม่ได้ → ยังต้องส่งข้อความให้ลูกค้าได้
+        if (originalImageUrl) {
+          try {
+            await sendLinePush(userId, [lineBotReplyMessage(cleanReply)], accessToken);
+            sent = true;
+            console.warn('[LINE Bot] ⚠️ Image failed; text fallback sent');
+          } catch (textErr: any) {
+            console.error('[LINE Bot] ❌ Text fallback also failed:', textErr?.response?.data || textErr.message);
+          }
+        }
       }
     }
 
     if (sent) {
       const botReply = await prisma.message.create({
-        data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: cleanReply },
+        data: {
+          conversationId: conversation.id,
+          tenantId,
+          senderType: 'bot',
+          type: sentWithImage ? 'image' : 'text',
+          content: cleanReply,
+          metadata: sentWithImage
+            ? JSON.stringify({
+                imageUrl: responseImage?.imageUrl,
+                imagePreviewUrl: responseImage?.imagePreviewUrl,
+                knowledgeId: responseImage?.knowledgeId,
+                aiKnowledgeImage: true,
+              })
+            : undefined,
+        },
       });
       emitToTenant(tenantId, 'new_message', {
         conversationId: conversation.id,

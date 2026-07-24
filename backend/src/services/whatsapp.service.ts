@@ -60,6 +60,14 @@ function isDepositNotCredited(text: string): boolean {
   return /ฝาก.{0,12}(ไม่เข้า|ยังไม่เข้า|หาย|ไม่มา)|โอน.{0,12}(ไม่เข้า|ยังไม่เข้า)|ยอด.{0,8}(ไม่เข้า|ยังไม่เข้า)|ຝາກ.{0,12}(ບໍ່ເຂົ້າ|ຍັງບໍ່ເຂົ້າ)|ໂອນ.{0,12}(ບໍ່ເຂົ້າ|ຍັງບໍ່ເຂົ້າ)/i.test(text || '');
 }
 
+function resolveKnowledgeImageFile(imageUrl?: string): string | undefined {
+  if (!imageUrl?.startsWith('/uploads/knowledge/')) return undefined;
+  const knowledgeRoot = path.resolve(process.cwd(), 'uploads', 'knowledge');
+  const filePath = path.resolve(process.cwd(), imageUrl.replace(/^\/+/, ''));
+  if (!filePath.startsWith(knowledgeRoot + path.sep) || !fs.existsSync(filePath)) return undefined;
+  return filePath;
+}
+
 function sessionDir(sessionKey: string): string {
   const dir = path.join(process.cwd(), 'auth_whatsapp', sessionKey);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -284,6 +292,7 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
 
     let reply: string;
     let responseFlow: string | undefined;
+    let responseImage: { imageUrl: string; imagePreviewUrl?: string; knowledgeId?: string } | undefined;
     const hasEarlierSlip = isDepositNotCredited(userMessage) && (
       await prisma.slipVerification.count({ where: { conversationId } }) > 0
       || await prisma.message.count({ where: { conversationId, senderType: 'customer', type: 'image' } }) > 0
@@ -305,17 +314,39 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
         { profileContext: buildProfileContext(profile), channel: 'whatsapp' },
       );
       reply = result.reply;
+      const imageWasSentRecently = result.knowledgeId && history.some((message: any) => {
+        if (message.senderType !== 'bot' || Date.now() - new Date(message.createdAt).getTime() > 30 * 60 * 1000) return false;
+        try { return JSON.parse(message.metadata || '{}').knowledgeId === result.knowledgeId; } catch { return false; }
+      });
+      if (result.imageUrl && !imageWasSentRecently) {
+        responseImage = {
+          imageUrl: result.imageUrl,
+          imagePreviewUrl: result.imagePreviewUrl,
+          knowledgeId: result.knowledgeId,
+        };
+      }
     }
 
-    await trySend(accountId, jid, reply);
+    const imageFile = resolveKnowledgeImageFile(responseImage?.imageUrl);
+    const sentWithImage = imageFile ? await trySend(accountId, jid, reply, imageFile) : false;
+    if (!sentWithImage) await trySend(accountId, jid, reply);
+    const responseMetadata = {
+      ...(responseFlow ? { flow: responseFlow } : {}),
+      ...(sentWithImage ? {
+        imageUrl: responseImage?.imageUrl,
+        imagePreviewUrl: responseImage?.imagePreviewUrl,
+        knowledgeId: responseImage?.knowledgeId,
+        aiKnowledgeImage: true,
+      } : {}),
+    };
     const botMsg = await prisma.message.create({
       data: {
         conversationId,
         tenantId,
         senderType: 'bot',
-        type: 'text',
+        type: sentWithImage ? 'image' : 'text',
         content: reply,
-        metadata: responseFlow ? JSON.stringify({ flow: responseFlow }) : undefined,
+        metadata: Object.keys(responseMetadata).length ? JSON.stringify(responseMetadata) : undefined,
       },
     });
     emitToTenant(tenantId, 'new_message', { conversationId, companyId, channel: 'whatsapp', message: { ...botMsg, senderType: 'bot' } });

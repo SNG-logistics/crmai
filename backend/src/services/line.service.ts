@@ -111,6 +111,17 @@ export function lineTextMessage(text: string) {
 }
 
 /**
+ * Build a LINE image message. LINE requires public HTTPS JPEG/PNG URLs.
+ */
+export function lineImageMessage(originalContentUrl: string, previewImageUrl?: string) {
+  return {
+    type: 'image',
+    originalContentUrl,
+    previewImageUrl: previewImageUrl || originalContentUrl,
+  };
+}
+
+/**
  * Build LINE text message with Quick Reply buttons
  */
 export function lineTextWithQuickReply(text: string, quickReplies?: { label: string; text: string }[]) {

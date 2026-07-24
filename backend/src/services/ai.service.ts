@@ -93,6 +93,15 @@ function scoreKB(kb: SearchableKnowledge, userMessage: string): number {
 }
 
 const MAX_HISTORY = 10; // จำบริบทได้ยาวขึ้น — ลูกค้าถามต่อเนื่องแล้วบอทไม่ลืมเรื่องเดิม
+const MIN_VISUAL_IMAGE_SCORE = 6; // ส่งรูปเฉพาะเมื่อความรู้จากรูปตรงกับคำถามอย่างชัดเจน
+
+export type BotMessageResult = {
+  reply: string;
+  shouldHandoff: boolean;
+  imageUrl?: string;
+  imagePreviewUrl?: string;
+  knowledgeId?: string;
+};
 
 // ─── Bot Settings (เก็บใน BotConfig.metadata เป็น JSON) ───────────────────────
 export type BotSettings = {
@@ -234,7 +243,7 @@ export async function processBotMessage(
     profileContext?: string;
     channel?: 'line' | 'whatsapp' | 'telegram';
   }
-): Promise<{ reply: string; shouldHandoff: boolean }> {
+): Promise<BotMessageResult> {
 
   // ⚡ BONUSTIME deterministic pre-check — ไม่ต้องพึ่งดวงของ LLM
   //  ลูกค้าถามหา bonustime/winrate ตรงๆ → คืนโทเคนทันที (webhook จะส่งการ์ดค่ายเกมเอง)
@@ -259,6 +268,14 @@ export async function processBotMessage(
     .filter(kb => kb.score >= 2)          // ตัด noise ที่คล้ายเล็กน้อย เก็บเฉพาะที่เกี่ยวจริง
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
+  const topKnowledge = relevantKb[0];
+  const matchedVisual = topKnowledge
+    && topKnowledge.sourceType === 'visual'
+    && topKnowledge.sendImage
+    && topKnowledge.imageUrl
+    && topKnowledge.score >= MIN_VISUAL_IMAGE_SCORE
+      ? topKnowledge
+      : null;
 
   const kbContext = relevantKb.length > 0
     ? `\n\n—— ความรู้ที่เกี่ยวข้อง (เรียงจากตรงที่สุด — ใช้ตอบก่อนเสมอ) ——\n${relevantKb.map((kb, i) => `${i + 1}. หัวข้อ: ${kb.question}\n   ข้อมูล: ${kb.answer}`).join('\n')}\n\n⚠️ ให้ตอบตามข้อมูลที่ผู้ดูแลอนุมัติด้านบนเท่านั้น ตอบให้ตรงคำถาม และห้ามเติมรายละเอียดที่ไม่มีในข้อมูล`
@@ -311,7 +328,15 @@ export async function processBotMessage(
       : 'ขออภัยค่ะ ระบบตอบอัตโนมัติขัดข้องชั่วคราว 🙏 รอแอดมินสักครู่นะคะ');
     const shouldHandoff = checkHandoff(userMessage, raw, settings.handoffKeywords);
 
-    return { reply: cleanReply, shouldHandoff };
+    return {
+      reply: cleanReply,
+      shouldHandoff,
+      ...(matchedVisual ? {
+        imageUrl: matchedVisual.imageUrl || undefined,
+        imagePreviewUrl: matchedVisual.imagePreviewUrl || undefined,
+        knowledgeId: matchedVisual.id,
+      } : {}),
+    };
   } catch (e: any) {
     const emsg = e?.response?.data?.error?.message || e?.response?.data?.message || e?.message;
     console.error('[AI] ❌ processBotMessage failed:', e?.response?.status, emsg);

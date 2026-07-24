@@ -12,7 +12,9 @@ type VisualKnowledgeItem = {
   sourceType: string;
   sourceText?: string | null;
   imageUrl?: string | null;
+  imagePreviewUrl?: string | null;
   imageAnalysis?: string | null;
+  sendImage: boolean;
   isActive: boolean;
   createdAt: string;
 };
@@ -39,6 +41,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
   const [previewUrl, setPreviewUrl] = useState('');
   const [sourceText, setSourceText] = useState('');
   const [category, setCategory] = useState('ข้อมูลจากรูป');
+  const [sendImage, setSendImage] = useState(true);
 
   useEffect(() => {
     if (!file) {
@@ -129,6 +132,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
     formData.append('companyId', companyId);
     formData.append('sourceText', sourceText.trim());
     formData.append('category', category.trim() || 'ข้อมูลจากรูป');
+    formData.append('sendImage', String(sendImage));
     if (file) formData.append('image', file);
 
     setSaving(true);
@@ -141,6 +145,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
       setItems(current => [response.data.item, ...current]);
       setTotal(current => current + 1);
       setSourceText('');
+      setSendImage(true);
       clearFile();
       toast.success('เพิ่มความรู้ให้ AI สำเร็จ ใช้ได้ทั้ง LINE และ WhatsApp ✅', { id: toastId });
     } catch (error: any) {
@@ -161,6 +166,23 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
       setItems(current => current.map(row => row.id === item.id ? response.data.item : row));
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'เปลี่ยนสถานะไม่สำเร็จ');
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const toggleSendImage = async (item: VisualKnowledgeItem) => {
+    setBusyId(item.id);
+    try {
+      const response = await api.put(
+        `/bot/knowledge/${item.id}`,
+        { sendImage: !item.sendImage },
+        { params: { companyId } },
+      );
+      setItems(current => current.map(row => row.id === item.id ? response.data.item : row));
+      toast.success(response.data.item.sendImage ? 'เปิดส่งรูปพร้อมคำตอบแล้ว' : 'ปิดการส่งรูปแล้ว');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'เปลี่ยนการตั้งค่าส่งรูปไม่สำเร็จ');
     } finally {
       setBusyId('');
     }
@@ -252,6 +274,10 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
             {saving ? <span className="spinner" style={{ width: 15, height: 15 }} /> : '✨'} {file ? 'วิเคราะห์รูปและเพิ่มความรู้' : 'เพิ่มความรู้ข้อความ'}
           </button>
         </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 11, cursor: file ? 'pointer' : 'default', color: file ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: '0.76rem' }}>
+          <input type="checkbox" checked={sendImage} disabled={!file} onChange={event => setSendImage(event.target.checked)} />
+          เมื่อตรงกับคำถามลูกค้า ให้ส่งรูปนี้พร้อมข้อความตอบผ่าน LINE และ WhatsApp
+        </label>
         <div style={{ marginTop: 9, color: 'var(--text-muted)', fontSize: '0.7rem', lineHeight: 1.55 }}>
           ระบบเก็บรายการได้ไม่จำกัด แต่เวลาตอบจะค้นและส่งเข้า AI เฉพาะข้อมูลที่เกี่ยวข้อง เพื่อให้ตอบเร็วและไม่สับสน
         </div>
@@ -270,6 +296,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
                 <div style={{ fontWeight: 750, fontSize: '0.87rem' }}>{item.question}</div>
                 <span className="tag">{item.category}</span>
                 {!item.isActive && <span className="tag" style={{ color: '#F59E0B' }}>พักการใช้งาน</span>}
+                {item.imageUrl && item.sendImage && <span className="tag" style={{ color: 'var(--teal)' }}>ส่งรูปพร้อมคำตอบ</span>}
               </div>
               {item.sourceText && (
                 <div style={{ color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', fontSize: '0.76rem', lineHeight: 1.5, marginTop: 6 }}>
@@ -292,6 +319,11 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
               <button className="btn btn-secondary btn-sm" disabled={busyId === item.id} onClick={() => toggleItem(item)}>
                 {item.isActive ? 'พักใช้' : 'เปิดใช้'}
               </button>
+              {item.imageUrl && (
+                <button className="btn btn-secondary btn-sm" disabled={busyId === item.id} onClick={() => toggleSendImage(item)}>
+                  {item.sendImage ? 'ปิดส่งรูป' : 'เปิดส่งรูป'}
+                </button>
+              )}
               <button className="btn btn-danger btn-sm" disabled={busyId === item.id} onClick={() => deleteItem(item)}>ลบ</button>
             </div>
           </div>
