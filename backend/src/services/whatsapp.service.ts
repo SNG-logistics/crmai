@@ -19,6 +19,16 @@ import qrcode from 'qrcode';
 import prisma from '../lib/prisma';
 import { emitToTenant } from '../lib/socket';
 import { checkRepeatAbuse, REPEAT_HANDOFF_REPLY } from './bot-guard';
+import { parseBotSettings, processBotMessage, visionAssistReply } from './ai.service';
+import {
+  buildProfileContext,
+  buildRegisterReply,
+  captureCustomerInfo,
+  isRegisterIntent,
+  mightContainCustomerInfo,
+  readProfile,
+} from './contact-memory.service';
+import { verifySlip } from './slip-verify.service';
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  Multi-company WhatsApp — 1 tenant มีได้หลายบริษัท, แต่ละบริษัทมีได้หลายเบอร์
@@ -44,6 +54,10 @@ const ctxMap    = new Map<string, AccountCtx>();// accountId → ctx (tenant/com
 // (ลูกค้าคนเดียวทักหลายเบอร์ = คนละบทสนทนา ไม่ชน @@unique([tenantId,channel,channelId]))
 export function waChannelId(accountId: string, jid: string): string {
   return `${accountId}:${jid}`;
+}
+
+function isDepositNotCredited(text: string): boolean {
+  return /ฝาก.{0,12}(ไม่เข้า|ยังไม่เข้า|หาย|ไม่มา)|โอน.{0,12}(ไม่เข้า|ยังไม่เข้า)|ยอด.{0,8}(ไม่เข้า|ยังไม่เข้า)|ຝາກ.{0,12}(ບໍ່ເຂົ້າ|ຍັງບໍ່ເຂົ້າ)|ໂອນ.{0,12}(ບໍ່ເຂົ້າ|ຍັງບໍ່ເຂົ້າ)/i.test(text || '');
 }
 
 function sessionDir(sessionKey: string): string {
@@ -206,10 +220,15 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
     });
 
     // 5. AI Bot reply — เคารพสวิตช์ AI auto-reply ต่อบริษัท (botConfig ของ company)
-    if (conversation.isBot && msgType === 'text') {
-      const bot = await prisma.botConfig.findFirst({ where: { companyId }, select: { isActive: true } });
+    if (conversation.isBot && (msgType === 'text' || msgType === 'image')) {
+      const bot = await prisma.botConfig.findFirst({ where: { companyId }, select: { isActive: true, metadata: true } });
       if (bot?.isActive !== false) {
-        await processBotReply(ctx, conversation.id, content, jid);
+        if (msgType === 'text') {
+          await processBotReply(ctx, conversation.id, contact.id, content, jid);
+        } else if (mediaMeta.imageUrl) {
+          const language = parseBotSettings(bot?.metadata).whatsappLanguage || 'th';
+          await processWhatsAppImage(ctx, conversation.id, contact.id, message.id, platformMsgId, mediaMeta.imageUrl, jid, language);
+        }
       }
     }
   } catch (err) {
@@ -218,7 +237,7 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
 }
 
 // ─── AI Bot reply via WhatsApp ────────────────────────────────────────────────
-async function processBotReply(ctx: AccountCtx, conversationId: string, userMessage: string, jid: string) {
+async function processBotReply(ctx: AccountCtx, conversationId: string, contactId: string, userMessage: string, jid: string) {
   const { tenantId, companyId, accountId } = ctx;
   try {
     // 🛡️ กันสแปมถามซ้ำเผา token → ตอบ auto ครั้งเดียว + สลับเป็น human (ไม่เรียก AI)
@@ -233,23 +252,171 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, userMess
       return;
     }
 
-    const { processBotMessage } = await import('./ai.service');
     const history = await prisma.message.findMany({ where: { conversationId }, orderBy: { createdAt: 'asc' }, take: 15 });
     const conversationHistory = history.map((m: any) => ({
       role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const,
       content: m.content,
     }));
 
-    // ใช้ AI config ของ "บริษัท" ที่บทสนทนานี้สังกัด
-    const { reply } = await processBotMessage(tenantId, conversationHistory, userMessage, undefined, companyId);
+    const contact = await prisma.contact.findFirst({ where: { id: contactId, tenantId } });
+    if (!contact) return;
+    const botConfig = await prisma.botConfig.findFirst({ where: { companyId }, select: { metadata: true } });
+    const language = parseBotSettings(botConfig?.metadata).whatsappLanguage || 'th';
+    const lastBot = [...history].reverse().find((m: any) => m.senderType === 'bot');
+    let lastBotMeta: any = {};
+    try { lastBotMeta = JSON.parse((lastBot as any)?.metadata || '{}'); } catch { lastBotMeta = {}; }
+    const registerIntent = isRegisterIntent(userMessage);
+    const hasCustomerInfo = mightContainCustomerInfo(userMessage);
+    const registrationFlow = registerIntent || lastBotMeta.flow === 'registration';
+
+    let profile = readProfile(contact as any);
+    if (hasCustomerInfo) {
+      const captured = await captureCustomerInfo({
+        tenantId,
+        contactId,
+        recentMessages: conversationHistory,
+        registrationFlow,
+        channel: 'whatsapp',
+      });
+      if (captured) profile = captured;
+      emitToTenant(tenantId, 'conversation_updated', { id: conversationId });
+    }
+
+    let reply: string;
+    let responseFlow: string | undefined;
+    const hasEarlierSlip = isDepositNotCredited(userMessage) && (
+      await prisma.slipVerification.count({ where: { conversationId } }) > 0
+      || await prisma.message.count({ where: { conversationId, senderType: 'customer', type: 'image' } }) > 0
+    );
+    if (hasEarlierSlip) {
+      reply = language === 'lo'
+        ? 'ແອດມິນໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ກຳລັງດຳເນີນການກວດສອບໃຫ້ ລໍຖ້າຈັກຄູ່ເຈົ້າ'
+        : 'แอดมินได้รับสลิปแล้วค่ะ กำลังดำเนินการตรวจสอบให้ รอสักครู่นะคะ';
+    } else if ((registerIntent && !hasCustomerInfo) || (registrationFlow && hasCustomerInfo)) {
+      reply = buildRegisterReply(profile, language);
+      responseFlow = 'registration';
+    } else {
+      const result = await processBotMessage(
+        tenantId,
+        conversationHistory,
+        userMessage,
+        { displayName: contact.displayName },
+        companyId,
+        { profileContext: buildProfileContext(profile), channel: 'whatsapp' },
+      );
+      reply = result.reply;
+    }
 
     await trySend(accountId, jid, reply);
-    const botMsg = await prisma.message.create({ data: { conversationId, tenantId, senderType: 'bot', type: 'text', content: reply } });
+    const botMsg = await prisma.message.create({
+      data: {
+        conversationId,
+        tenantId,
+        senderType: 'bot',
+        type: 'text',
+        content: reply,
+        metadata: responseFlow ? JSON.stringify({ flow: responseFlow }) : undefined,
+      },
+    });
     emitToTenant(tenantId, 'new_message', { conversationId, companyId, channel: 'whatsapp', message: { ...botMsg, senderType: 'bot' } });
 
     // Never hand off automatically. An admin can send a reply directly from the inbox.
   } catch (err) {
     console.error('[WA] Bot reply error:', err);
+  }
+}
+
+async function processWhatsAppImage(
+  ctx: AccountCtx,
+  conversationId: string,
+  contactId: string,
+  dbMessageId: string,
+  platformMsgId: string,
+  imageUrl: string,
+  jid: string,
+  language: 'th' | 'lo',
+) {
+  const { tenantId, companyId, accountId } = ctx;
+  try {
+    const uploadsRoot = path.resolve(process.cwd(), 'uploads');
+    const filePath = path.resolve(process.cwd(), imageUrl.replace(/^\/+/, ''));
+    if (!filePath.startsWith(uploadsRoot + path.sep) || !fs.existsSync(filePath)) {
+      throw new Error('WhatsApp image file not found');
+    }
+    const buffer = fs.readFileSync(filePath);
+    const slip = await verifySlip({
+      tenantId,
+      conversationId,
+      contactId,
+      messageId: platformMsgId || dbMessageId,
+      buffer,
+      filePath,
+      language,
+    });
+
+    let reply = slip.message;
+    let imageAnalysis: any = { kind: 'slip', confidence: 'high', slipStatus: slip.status };
+    if (slip.status === 'not_slip' || slip.status === 'error') {
+      const history = await prisma.message.findMany({
+        where: { conversationId, type: 'text' },
+        orderBy: { createdAt: 'asc' },
+        take: 10,
+      });
+      const assist = await visionAssistReply({
+        tenantId,
+        companyId,
+        imageBase64: `data:image/jpeg;base64,${buffer.toString('base64')}`,
+        conversationHistory: history.map((m: any) => ({
+          role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const,
+          content: m.content,
+        })),
+        lastCustomerText: [...history].reverse().find((m: any) => m.senderType === 'customer')?.content,
+        channel: 'whatsapp',
+      });
+      imageAnalysis = {
+        kind: assist.kind,
+        confidence: assist.confidence,
+        summary: assist.summary,
+        slipStatus: slip.status,
+      };
+      if (!assist.isSlip) reply = assist.reply;
+    }
+
+    const original = await prisma.message.findUnique({ where: { id: dbMessageId }, select: { metadata: true } });
+    let metadata: any = {};
+    try { metadata = JSON.parse(original?.metadata || '{}'); } catch { metadata = {}; }
+    metadata.aiImageAnalysis = imageAnalysis;
+    await prisma.message.update({ where: { id: dbMessageId }, data: { metadata: JSON.stringify(metadata) } });
+
+    if (!reply) {
+      reply = language === 'lo'
+        ? 'ແອດມິນໄດ້ຮັບຮູບແລ້ວເຈົ້າ ກຳລັງກວດສອບໃຫ້'
+        : 'แอดมินได้รับรูปแล้วค่ะ กำลังตรวจสอบให้';
+    }
+    await trySend(accountId, jid, reply);
+    const botMsg = await prisma.message.create({
+      data: {
+        conversationId,
+        tenantId,
+        senderType: 'bot',
+        type: 'text',
+        content: reply,
+        metadata: JSON.stringify({ imageAnalysis }),
+      },
+    });
+    emitToTenant(tenantId, 'new_message', {
+      conversationId,
+      companyId,
+      channel: 'whatsapp',
+      message: { ...botMsg, senderType: 'bot' },
+    });
+    emitToTenant(tenantId, 'conversation_updated', { id: conversationId });
+  } catch (err: any) {
+    console.error('[WA] Image AI error:', err?.message || err);
+    const reply = language === 'lo'
+      ? 'ໄດ້ຮັບຮູບແລ້ວເຈົ້າ ແອດມິນຈະກວດສອບໃຫ້'
+      : 'ได้รับรูปแล้วค่ะ แอดมินจะตรวจสอบให้';
+    await trySend(accountId, jid, reply);
   }
 }
 

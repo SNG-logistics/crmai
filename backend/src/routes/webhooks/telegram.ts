@@ -22,25 +22,6 @@ function isPhoneNumber(text: string): boolean {
   return THAI_MOBILE_REGEX.test(text) || THAI_LANDLINE_REGEX.test(text) || LAO_PHONE_REGEX.test(text);
 }
 
-function isFreeCreditQuery(text: string): boolean {
-  const t = text.toLowerCase();
-  const thaiKeywords = [
-    'เครดิตฟรี',
-    'ฟรีเครดิต',
-    'เครดิฟรี',
-    'เคดิสฟรี',
-    'เครดิตฟี',
-    'เครดิต ฟรี',
-    'ฟรี เครดิต',
-    'ขอเครดิต',
-    'ขอเคดิด',
-    'ขอเครดิส'
-  ];
-  const englishKeywords = ['free credit', 'freecredit'];
-
-  return thaiKeywords.some(kw => t.includes(kw)) || englishKeywords.some(kw => t.includes(kw));
-}
-
 /** POST /api/webhooks/telegram/:tenantId[/:companyId] */
 async function handleTelegramWebhook(req: Request, res: Response) {
   const { tenantId } = req.params;
@@ -150,25 +131,6 @@ async function handleTelegramWebhook(req: Request, res: Response) {
         return;
       }
 
-      // ✅ ตรวจสอบ: เครดิตฟรี → ตอบกลับว่าไม่มีบริการและให้รออัปเดต โดยบอทยังดูแลอยู่
-      if (isFreeCreditQuery(normalized.content)) {
-        const reply = `ตอนนี้ยังไม่มีบริการเครดิตฟรีนะคะ ถ้ามีช่วงไหน เดี๋ยวแอดมินแจ้งให้ทราบนะคะ 🙏😊`;
-        try {
-          await sendTelegramMessage(chatId, reply, botToken);
-          const botReply = await prisma.message.create({
-            data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: reply },
-          });
-          emitToTenant(tenantId, 'new_message', {
-            conversationId: conversation.id,
-            message: { ...botReply, senderType: 'bot' },
-            contact, channel: 'telegram',
-          });
-        } catch (e: any) {
-          console.warn(`[TG Bot] free credit reply failed:`, e.message);
-        }
-        return;
-      }
-
       try {
         const history = await prisma.message.findMany({
           where: { conversationId: conversation.id },
@@ -182,10 +144,14 @@ async function handleTelegramWebhook(req: Request, res: Response) {
 
         // 💾 เก็บข้อมูลลูกค้าอัตโนมัติ + ส่ง context ให้บอท
         let profileForBot = readProfile(contact as any);
+        const lastBotMsg = [...conversationHistory].reverse().find(m => m.role === 'assistant')?.content || '';
+        const inRegisterFlow = /✅|รบกวนลูกค้าแจ้งข้อมูล|ขอเพิ่มอีกนิด|ยืนยันว่าข้อมูลถูกต้อง/.test(lastBotMsg);
         if (mightContainCustomerInfo(normalized.content)) {
           const captured = await captureCustomerInfo({
             tenantId, contactId: contact.id,
             recentMessages: [...conversationHistory.slice(-5), { role: 'user', content: normalized.content }],
+            registrationFlow: inRegisterFlow || isRegisterIntent(normalized.content),
+            channel: 'telegram',
           });
           if (captured) profileForBot = captured;
         }
@@ -197,7 +163,7 @@ async function handleTelegramWebhook(req: Request, res: Response) {
             tenantId, conversationHistory, normalized.content,
             { displayName: contact.displayName },
             conversation.companyId,
-            { profileContext: buildProfileContext(profileForBot) },
+            { profileContext: buildProfileContext(profileForBot), channel: 'telegram' },
           );
           reply = r.reply;
         }

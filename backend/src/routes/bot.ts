@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
-import { generateAIResponse } from '../services/ai.service';
+import { generateAIResponse, parseBotSettings, processBotMessage } from '../services/ai.service';
 const router = Router();
 router.use(verifyToken);
 
@@ -41,8 +41,12 @@ router.put('/', async (req: Request, res: Response) => {
     const { systemPrompt, model, temperature, isActive, settings } = req.body;
     const companyId = await resolveCompanyId(req);
     const existing = await prisma.botConfig.findFirst({ where: { companyId } });
-    // settings (การตั้งค่าละเอียด) เก็บใน metadata เป็น JSON
-    const metadata = settings !== undefined ? JSON.stringify(settings || {}) : undefined;
+    // merge metadata เดิมเสมอ เพื่อไม่ให้หน้า WhatsApp/AI เขียนค่าของอีกหน้าหาย
+    let currentMetadata: any = {};
+    try { currentMetadata = JSON.parse(existing?.metadata || '{}'); } catch { currentMetadata = {}; }
+    const metadata = settings !== undefined
+      ? JSON.stringify({ ...currentMetadata, ...(settings || {}) })
+      : undefined;
     const bot = existing
       ? await prisma.botConfig.update({ where: { id: existing.id }, data: { systemPrompt, model, temperature, isActive, ...(metadata !== undefined ? { metadata } : {}) } })
       : await prisma.botConfig.create({ data: { tenantId: req.tenantId!, companyId, name: 'AI Bot', systemPrompt, model, temperature, isActive, metadata: metadata || '{}' } });
@@ -88,14 +92,17 @@ router.delete('/knowledge/:id', async (req: Request, res: Response) => {
 
 router.post('/test', async (req: Request, res: Response) => {
   try {
-    const { message, history = [] } = req.body;
+    const { message, history = [], channel } = req.body;
     const companyId = await resolveCompanyId(req);
-    const bot = await prisma.botConfig.findFirst({ where: { companyId }, include: { knowledgeBase: { where: { isActive: true } } } });
-    const kbContext = (bot?.knowledgeBase || []).map((kb: any) => `Q: ${kb.question}\nA: ${kb.answer}`).join('\n\n');
-    const systemPrompt = `${bot?.systemPrompt || 'คุณเป็น AI Assistant ที่เป็นมิตร'}\n\nฐานความรู้:\n${kbContext}`;
-    const messages = [{ role: 'system' as const, content: systemPrompt }, ...history, { role: 'user' as const, content: message }];
-    const reply = await generateAIResponse(messages, bot?.model || 'gpt-4o', bot?.temperature || 0.7);
-    return res.json({ success: true, reply });
+    const result = await processBotMessage(
+      req.tenantId!,
+      history,
+      (message || '').toString(),
+      undefined,
+      companyId,
+      { channel: ['line', 'whatsapp', 'telegram'].includes(channel) ? channel : undefined },
+    );
+    return res.json({ success: true, reply: result.reply });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
   }
@@ -109,7 +116,14 @@ router.post('/auto-seed', async (req: Request, res: Response) => {
     if (!bot) return res.status(404).json({ success: false, message: 'กรุณาตั้งค่า Bot ก่อน' });
 
     const { category = 'general', count = 10 } = req.body;
-    const prompt = bot.systemPrompt || 'ธุรกิจบริการออนไลน์';
+    const settings = parseBotSettings(bot.metadata);
+    const source = [bot.systemPrompt, settings.businessInfo].filter(Boolean).join('\n\n').trim();
+    if (!source) {
+      return res.status(400).json({
+        success: false,
+        message: 'กรุณาใส่ System Prompt หรือข้อมูลธุรกิจก่อนสร้าง FAQ เพื่อป้องกัน AI แต่งความรู้เอง',
+      });
+    }
 
     const messages = [
       {
@@ -122,9 +136,10 @@ router.post('/auto-seed', async (req: Request, res: Response) => {
       },
       {
         role: 'user' as const,
-        content: `บริบทธุรกิจ: "${prompt}"
+        content: `ข้อมูลต้นทางที่ผู้ดูแลอนุญาต:
+"""${source}"""
 หมวด: ${category}
-สร้าง FAQ ${Math.min(count, 15)} ข้อ:`
+สร้าง FAQ ${Math.min(count, 15)} ข้อโดยใช้เฉพาะข้อมูลต้นทางนี้:`
       }
     ];
 
@@ -161,14 +176,22 @@ router.post('/auto-seed', async (req: Request, res: Response) => {
 // ─── PUT /api/bot/extended — welcome message, quick replies, handoff keywords ──
 router.put('/extended', async (req: Request, res: Response) => {
   try {
-    const { welcomeMessage, quickReplies, handoffKeywords } = req.body;
+    const { welcomeMessage, quickReplies, handoffKeywords, whatsappLanguage } = req.body;
     const companyId = await resolveCompanyId(req);
-    const metadata = JSON.stringify({ welcomeMessage, quickReplies, handoffKeywords });
     const existing = await prisma.botConfig.findFirst({ where: { companyId } });
+    let current: any = {};
+    try { current = JSON.parse(existing?.metadata || '{}'); } catch { current = {}; }
+    const metadata = JSON.stringify({
+      ...current,
+      welcomeMessage,
+      quickReplies,
+      handoffKeywords,
+      whatsappLanguage: whatsappLanguage === 'lo' ? 'lo' : 'th',
+    });
     const bot = existing
       ? await prisma.botConfig.update({ where: { id: existing.id }, data: { metadata } })
       : await prisma.botConfig.create({
-          data: { tenantId: req.tenantId!, companyId, name: 'AI Bot', systemPrompt: 'คุณเป็น AI Assistant ที่เป็นมิตร', model: 'gpt-4o-mini', temperature: 0.7, isActive: true, metadata },
+          data: { tenantId: req.tenantId!, companyId, name: 'AI Bot', systemPrompt: '', model: 'gemini-3.6-flash', temperature: 0.7, isActive: true, metadata },
         });
     return res.json({ success: true, bot });
   } catch (err: any) {

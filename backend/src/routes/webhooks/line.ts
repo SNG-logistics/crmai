@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../../lib/prisma';
 import { verifyLineSignature, parseLineEvent, getLineProfile, sendLineReply, sendLinePush, lineTextMessage, lineBotReplyMessage, lineWelcomeMessage } from '../../services/line.service';
-import { processBotMessage, generateAIResponse, visionAssistReply } from '../../services/ai.service';
+import { processBotMessage, visionAssistReply } from '../../services/ai.service';
 import { checkRepeatAbuse, REPEAT_HANDOFF_REPLY } from '../../services/bot-guard';
 import { emitToTenant } from '../../lib/socket';
 import { verifySlip } from '../../services/slip-verify.service';
@@ -232,28 +232,8 @@ router.post('/:tenantId', handleLineWebhook);
 router.post('/:tenantId/:companyId', handleLineWebhook);
 
 // ─── Smart Fallback Messages ──────────────────────────────────────────────────
-const FALLBACK_MESSAGES = [
-  `ขอโทษนะคะ ตอบไม่ได้ตอนนี้ค่ะ เดี๋ยวเจ้าหน้าที่มาช่วยค่ะ 🙏`,
-  `ขอโทษค่ะ ไม่แน่ใจเรื่องนี้ เดี๋ยวคนมาดูแลให้นะคะ`,
-  `รับทราบแล้วค่ะ เดี๋ยวเจ้าหน้าที่ติดต่อกลับนะคะ`,
-  `โอเคค่ะ รอแป๊บนึงนะคะ เดี๋ยวมีคนมาช่วย 😊`,
-];
-
-function getSmartFallback(userMessage: string): string {
-  const msg = userMessage.toLowerCase();
-  if (msg.includes('สมัคร') || msg.includes('register') || msg.includes('เปิดบัญชี')) {
-    return `🖌รบกวนลูกค้าแจ้งข้อมูลดังนี้นะคะ🖌\n✅ชื่อ - นามสกุล :\n✅เบอร์โทรศัพท์ที่ใช้สมัครสมาชิก :\n✅ธนาคาร :\n✅เลขบัญชีธนาคาร :\n\nรบกวนคุณลูกค้าพิมพ์ข้อมูลเป็นตัวอักษรให้กับทางทีมงานนะคะ`;
-  }
-  if (msg.includes('ฝาก') || msg.includes('ถอน') || msg.includes('โอน')) {
-    return `ส่งสลิปมาได้เลยค่ะ 💳 เดี๋ยวตรวจสอบให้ค่ะ`;
-  }
-  if (msg.includes('โปรโมชั่น') || msg.includes('โปร') || msg.includes('โบนัส')) {
-    return `เดี๋ยวแจ้งโปรให้นะคะ 🎁 รอแป๊บนึงนะคะ`;
-  }
-  if (msg.includes('ปัญหา') || msg.includes('ไม่ได้') || msg.includes('error')) {
-    return `เข้าใจแล้วค่ะ 🙏 เดี๋ยวมีเจ้าหน้าที่สอบดูให้ค่ะ`;
-  }
-  return FALLBACK_MESSAGES[Math.floor(Math.random() * FALLBACK_MESSAGES.length)];
+function getSmartFallback(): string {
+  return 'ขออภัยค่ะ ระบบตอบอัตโนมัติขัดข้องชั่วคราว รอแอดมินตรวจสอบสักครู่นะคะ 🙏';
 }
 
 // ─── Slip Tracker ─────────────────────────────────────────────────────────────
@@ -284,202 +264,6 @@ function isPaymentIssue(text: string): boolean {
   return PAYMENT_ISSUE_KEYWORDS.some(kw => t.includes(kw));
 }
 
-// Keyword บ่งบอกว่าลูกค้าหมดเงิน / เงินหมด
-const OUT_OF_MONEY_KEYWORDS = [
-  'หมดเงิน', 'เงินหมด', 'หมดตัว', 'หมดแล้ว',
-  'ไม่มีเงิน', 'ไม่เหลือเงิน', 'เงินไม่เหลือ',
-  'เจ๊งหมด', 'หมดเจ๊ง', 'หมดทุน',
-  'ทุนหมด', 'หมดบัญชี',
-  'ไม่เหลือแล้ว', 'พักก่อนดีมั้ย',
-  'เล่นไม่ได้แล้ว', 'เล่นไม่ได้', 'ไม่ได้เล่น',
-  'หมดครั้งนี้', 'หมดอีกแล้ว',
-];
-
-const OUT_OF_MONEY_REPLIES = [
-  // โทน: ใจเย็น ชวนพัก (ตัวอย่างจากเจ้าของ)
-  `เล่นใจเย็นๆ นะคะ อย่าเพิ่งรีบมาก หยุดพักสักครู่ แล้วค่อยๆ มาใหม่นะคะ จะรอต้อนรับเสมอเลยค่า 😊`,
-
-  // โทน: ดวงยังไม่มา รอวันดี
-  `วันนี้ดวงอาจยังไม่มาถึงค่ะ ไม่เป็นไรนะคะ พักก่อนได้เลยค่ะ พรุ่งนี้อาจเป็นวันของเราก็ได้นะคะ 🍀 จะรอต้อนรับอยู่เสมอเลยค่า`,
-
-  // โทน: ดูแลตัวเอง ออกไปรับอากาศ
-  `ขอบคุณที่บอกนะคะ 🙏 ลองพักผ่อนก่อนนะคะ ดื่มน้ำ หรือออกไปรับอากาศสักนิด กลับมาแล้วค่อยเล่นใหม่นะคะ ดวงจะมาเองเลยค่า 😊`,
-
-  // โทน: เอาใจช่วย บางวันก็เป็นแบบนี้
-  `เข้าใจเลยค่ะ บางวันก็เป็นแบบนี้นะคะ ไม่ต้องกังวลค่ะ 💪 หยุดพักก่อนแล้วรอบหน้าดวงจะมาแน่นอนเลยค่า จะรออยู่นะคะ`,
-
-  // โทน: หายใจลึกๆ สงบใจ
-  `หายใจลึกๆ ก่อนนะคะ 😊 ไม่ต้องรีบค่ะ ค่อยๆ พักก่อน เดี๋ยวโชคดีก็จะตามมาเองนะคะ จะรออยู่ตรงนี้เสมอเลยค่า 🌸`,
-
-  // โทน: พลังบวก ดวงหมุนเวียน
-  `ยังไม่สายนะคะ! แค่พักก่อน แล้วกลับมาใหม่ด้วยพลังบวกนะคะ ดวงมันหมุนเวียนเสมอค่ะ เดี๋ยวมาถึงเราแน่ๆ เลยค่า ✨`,
-
-  // โทน: อ่อนโยน ไม่ตัดสิน
-  `ไม่ต้องรู้สึกแย่นะคะ 🥰 มันเกิดขึ้นได้กับทุกคนค่ะ ลองหยุดพักสักครู่ ทำอะไรที่ชอบก่อนนะคะ แล้วค่อยกลับมาเมื่อพร้อมค่ะ จะรอเสมอเลยนะคะ`,
-
-  // โทน: เพื่อนคุย ไม่ฝืน
-  `อย่าฝืนนะคะ 😌 ถ้ารู้สึกว่าวันนี้ดวงยังไม่มา ก็พักก่อนได้เลยค่ะ ไม่มีใครตัดสินนะคะ แล้วเดี๋ยวค่อยกลับมาเล่นใหม่นะคะ จะรออยู่นะคะ 🌟`,
-
-  // โทน: แคร์สุขภาพ จิตใจก่อน
-  `สุขภาพใจสำคัญที่สุดนะคะ 💙 พักก่อนนะคะ ไม่ต้องรีบ เดี๋ยวเมื่อหัวใจโล่งๆ แล้ว ค่อยกลับมาเล่นใหม่ดีกว่านะคะ ดวงดีก็จะตามมาเองค่า`,
-
-  // โทน: เบาๆ ขอให้โชคดี
-  `โชคดีจะมาหาเราเองนะคะ แค่พักสักนิดก่อนค่ะ 🍀 อย่าเพิ่งหนักใจนะคะ แล้วค่อยๆ กลับมาใหม่เมื่อพร้อม จะรอต้อนรับอยู่เสมอเลยค่า 😊`,
-];
-
-function isOutOfMoney(text: string): boolean {
-  const t = text.toLowerCase();
-  return OUT_OF_MONEY_KEYWORDS.some(kw => t.includes(kw));
-}
-
-// ─── เกมไหนแตก / แนะนำเกม ────────────────────────────────────────────────────
-// ─── เกมไหนแตก / แนะนำเกม ────────────────────────────────────────────────────
-const HOT_GAMES_KEYWORDS = [
-  'เกมไหนแตก', 'เกมแตก', 'เกมดัง', 'แนะนำเกม', 'เกมอะไรดี',
-  'เล่นเกมอะไร', 'เกมไหนดี', 'เกมอะไรแตก', 'เกมไหนได้เงิน',
-  'เกมฮิต', 'สล็อตไหนแตก', 'สล็อตแตก', 'บาคาร่าไหนดี',
-  'เกมแนะนำ', 'เล่นอะไรดี', 'ตอนนี้เกมไหน', 'เกมไหนดีสุด',
-  'ขอเกมแตกดีๆ', 'ขอเกมแตก', 'ขอเกมส์แตก', 'ขอสล็อตแตกดีๆ',
-  'ขอเกมแตกวันนี้', 'แนะนำสล็อต', 'แนะนำสล๊อต', 'เล่นเกมไหนแตก',
-  'มีเกมแตกแนะนำไหม', 'อยากบวกเล่นเกมไหนดี', 'ขอเกมน่าเล่น',
-  'ขอเกมส์น่าเล่น', 'เกมไหนกำลังแตก', 'ขอสล็อตแตกๆ',
-  'ขอแนวทาง', 'ขอเกมนำทาง', 'ขอค่ายไหนดี', 'เล่นค่ายไหนดี',
-  'ค่ายไหนแตกดี', 'เกมส์ไหนแตกดี', 'มีเกมส์ไหนแตก', 'เล่นไรดี',
-  'เล่นสล็อตไหนดี', 'เล่นสล๊อตไหนดี', 'เกมแนะนำวันนี้',
-  'แนะนำสล็อตแตกดี', 'มีเกมน่าเล่นแนะนำไหม', 'มีเกมแตกๆไหม',
-  'ขอเกมทำเงิน', 'ขอเกมแตกง่าย', 'เกมไหนแตกง่าย',
-  'แนะนำสล็อตแตกง่าย', 'แนะนำสล๊อตแตกง่าย', 'สล็อตค่ายไหนดี',
-  'ขอสล็อตแตกวันนี้', 'เกมส์ไหนดี', 'ขอแนวทางสล็อต', 'ขอแนวทางเกม'
-];
-
-function isHotGamesQuery(text: string): boolean {
-  const t = text.toLowerCase();
-  return HOT_GAMES_KEYWORDS.some(kw => t.includes(kw));
-}
-
-// ลิสต์ประวัติการแนะนำเกมต่อห้องสนทนาเพื่อไม่ให้ซ้ำกันภายใน 1 ชั่วโมง
-const lastRecommendedGames = new Map<string, { games: string[]; timestamp: number }>();
-
-const FALLBACK_GAMES_POOL = [
-  { name: 'Treasures of Aztec', provider: 'PG Soft' },
-  { name: 'Lucky Neko', provider: 'PG Soft' },
-  { name: 'Wild Bounty Bandito', provider: 'PG Soft' },
-  { name: 'Caishen Wins', provider: 'PG Soft' },
-  { name: 'Fortune Ox', provider: 'PG Soft' },
-  { name: 'Fortune Tiger', provider: 'PG Soft' },
-  { name: 'Dragon Hatch', provider: 'PG Soft' },
-  { name: 'Ganesha Gold', provider: 'PG Soft' },
-  { name: 'Songkran Splash', provider: 'PG Soft' },
-  { name: 'Sugar Rush', provider: 'Pragmatic Play' },
-  { name: 'Sweet Bonanza', provider: 'Pragmatic Play' },
-  { name: 'Gates of Olympus', provider: 'Pragmatic Play' },
-  { name: 'Starlight Princess', provider: 'Pragmatic Play' },
-  { name: 'Wild West Gold', provider: 'Pragmatic Play' },
-  { name: 'Roma', provider: 'Joker Gaming' },
-  { name: 'Roma X', provider: 'Jili' },
-  { name: 'Boxing King', provider: 'Jili' }
-];
-
-const FALLBACK_REASONS = [
-  'ช่วงนี้สถิติคนเล่นเยอะมากค่ะ มีลุ้นโบนัสแตกง่ายเลย 🤑✨',
-  'ช่วงเวลานี้ประวัติโบนัสแตกดีค่ะ น่าลองสลับเล่นดูนะคะ 🎉💸',
-  'มีคนเพิ่งชนะรางวัลใหญ่ไปหมาดๆ เลยค่ะ ดวงกำลังขึ้นเลย 🌟💰',
-  'อัตราการจ่ายคืนสถิติกำลังพุ่งสูงค่ะ ลองสับเปลี่ยนเกมดูนะคะ 🚀💵',
-  'ช่วงนี้ฟรีสปินเข้ารัวๆ เลยค่ะ ขอให้เฮงๆ รวยๆ นะคะ 🥰💎'
-];
-
-async function getHotGamesReply(conversationId: string): Promise<string> {
-  const now = new Date();
-  const hourTH = (now.getUTCHours() + 7) % 24;
-
-  let timeLabel: string;
-  let timeEmoji: string;
-
-  if (hourTH >= 0 && hourTH < 6) {
-    timeLabel = 'ช่วงดึกนี้'; timeEmoji = '🌙';
-  } else if (hourTH >= 6 && hourTH < 12) {
-    timeLabel = 'ช่วงเช้านี้'; timeEmoji = '🌅';
-  } else if (hourTH >= 12 && hourTH < 17) {
-    timeLabel = 'ช่วงบ่ายนี้'; timeEmoji = '☀️';
-  } else if (hourTH >= 17 && hourTH < 21) {
-    timeLabel = 'ช่วงเย็นนี้'; timeEmoji = '🌆';
-  } else {
-    timeLabel = 'ช่วงกลางคืนนี้'; timeEmoji = '🌃';
-  }
-
-  try {
-    const prompt = `คุณเป็นแอดมินเว็บสล็อตออนไลน์ บริการลูกค้าอย่างเป็นกันเองและสุภาพ อบอุ่น มีความหวัง
-ลูกค้าทักมาขอเกมสล็อตที่กำลังแตกดี ตอนนี้เวลา ${hourTH}:00 น. (เวลาไทย)
-
-หน้าที่ของคุณ:
-สุ่มแนะนำเกมสล็อตออนไลน์ที่มีอยู่จริงจำนวน 2-3 เกม (อย่าแนะนำแต่เกมซ้ำเดิมๆ เช่น Sweet Bonanza, Gates of Olympus, Mahjong Ways ทุกครั้ง ให้สลับแนะนำเกมอื่นๆ บ้างเพื่อความหลากหลาย)
-
-คอลเลกชันตัวอย่างเกมจริงที่คุณสามารถเลือกแนะนำได้ (หรือแนะนำเกมจริงอื่นๆ จากค่ายเหล่านี้):
-- PG Soft: Treasures of Aztec (สาวถ้ำ), Wild Bounty Bandito, Lucky Neko (เนโกะ), Caishen Wins, Ganesha Fortune, Fortune Ox, Fortune Tiger, Songkran Splash, Dragon Hatch
-- Pragmatic Play: Sugar Rush, Sweet Bonanza, Gates of Olympus, Starlight Princess, Cleocatra, Big Bass Bonanza, Wild West Gold
-- Joker Gaming: Roma, Horus Eye, Joker Madness
-- Jili: Roma X, Super Rich, Boxing King
-
-จัดรูปแบบข้อความตอบกลับให้เป็นไปตามนี้เป๊ะๆ (ห้ามมีข้อความทักทาย หรือคำชี้แจงอื่นก่อนหรือหลังรูปแบบนี้):
-
-• [ชื่อเกม] - [ชื่อค่าย]
-• [ชื่อเกม] - [ชื่อค่าย]
-• [ชื่อเกม] - [ชื่อค่าย]
-
-[ประโยควิเคราะห์/ให้ความหวังและแนะนำสั้นๆ ว่าทำไมเวลานี้น่าลอง เช่น ช่วงนี้สถิติคนเล่นเยอะ อัตราการจ่ายกำลังดี/มีลุ้นโบนัสแตกง่าย ไม่เกิน 2 ประโยค + ใส่ emoji เช่น 🤑✨]
-
-กฎเหล็กสำคัญ:
-1. ⚠️ ต้องใช้รูปแบบลิสต์ • [ชื่อเกม] - [ชื่อค่าย] เท่านั้น ห้ามใส่ตัวหนา **
-2. ⚠️ ห้ามรับประกัน 100% ว่าจะชนะหรือจะแตก ให้บอกเป็นแนวทาง/สถิติ
-3. ⚠️ ห้ามใช้ศัพท์เทคนิค เช่น RNG, อัลกอริทึม, RTP, ความผันผวน ให้ใช้คำง่ายๆ ที่คนเล่นเข้าใจ
-4. ⚠️ ห้ามพูดคำทักทาย เช่น สวัสดีค่ะ ยินดีต้อนรับ ให้ขึ้นต้นลิสต์ทันที`;
-
-    const aiReply = await generateAIResponse(
-      [{ role: 'system', content: prompt }],
-      process.env.COMETAPI_MODEL || 'gpt-4o',
-      0.9,
-      250
-    );
-
-    if (aiReply) {
-      return `${timeEmoji} ${timeLabel} เกมที่น่าสนใจนะคะ!\n\n${aiReply.trim()}`;
-    }
-  } catch (e: any) {
-    console.warn('[LINE Bot] AI hot-games failed, using fallback:', e.message);
-  }
-
-  // ─── Fallback กรณี AI ล่ม / ขัดข้อง ───
-  let availablePool = FALLBACK_GAMES_POOL;
-  const cached = lastRecommendedGames.get(conversationId);
-  const ONE_HOUR = 3600000; // 1 ชั่วโมงในหน่วย ms
-
-  if (cached && (Date.now() - cached.timestamp < ONE_HOUR)) {
-    // กรองเอาเกมที่เคยแนะนำไปใน 1 ชั่วโมงที่ผ่านมาออก
-    availablePool = FALLBACK_GAMES_POOL.filter(g => !cached.games.includes(g.name));
-    
-    // ป้องกันกรณีที่กรองจนเหลือน้อยกว่า 3 เกม (ให้ย้อนกลับไปใช้ pool เต็ม)
-    if (availablePool.length < 3) {
-      availablePool = FALLBACK_GAMES_POOL;
-    }
-  }
-
-  // สุ่มเลือก 3 เกมที่เหลือ
-  const shuffled = [...availablePool].sort(() => 0.5 - Math.random());
-  const selectedGames = shuffled.slice(0, 3);
-
-  // บันทึกประวัติการแนะนำเพื่อป้องกันการซ้ำใน 1 ชั่วโมงถัดไป
-  lastRecommendedGames.set(conversationId, {
-    games: selectedGames.map(g => g.name),
-    timestamp: Date.now()
-  });
-
-  // สุ่มประโยคลงท้ายที่เป็นมิตร
-  const reason = FALLBACK_REASONS[Math.floor(Math.random() * FALLBACK_REASONS.length)];
-  const gameLines = selectedGames.map(g => `• ${g.name} - ${g.provider}`).join('\n');
-
-  return `${timeEmoji} ${timeLabel} เกมที่น่าสนใจนะคะ!\n\n${gameLines}\n\n${reason}`;
-}
-
 const THAI_MOBILE_REGEX = /(?:\+?66|0)[689]\d{1}[-\s]?\d{3}[-\s]?\d{4}/;
 const THAI_LANDLINE_REGEX = /(?:\+?66|0)[2-57]\d{0,1}[-\s]?\d{3}[-\s]?\d{4}/;
 const LAO_PHONE_REGEX = /(?:020|030)[-\s]?\d{4}[-\s]?\d{4}/;
@@ -491,25 +275,6 @@ function isPhoneNumber(text: string): boolean {
   if (/^(020|030)\d{8}$/.test(clean)) return true;
 
   return THAI_MOBILE_REGEX.test(text) || THAI_LANDLINE_REGEX.test(text) || LAO_PHONE_REGEX.test(text);
-}
-
-function isFreeCreditQuery(text: string): boolean {
-  const t = text.toLowerCase();
-  const thaiKeywords = [
-    'เครดิตฟรี',
-    'ฟรีเครดิต',
-    'เครดิฟรี',
-    'เคดิสฟรี',
-    'เครดิตฟี',
-    'เครดิต ฟรี',
-    'ฟรี เครดิต',
-    'ขอเครดิต',
-    'ขอเคดิด',
-    'ขอเครดิส'
-  ];
-  const englishKeywords = ['free credit', 'freecredit'];
-
-  return thaiKeywords.some(kw => t.includes(kw)) || englishKeywords.some(kw => t.includes(kw));
 }
 
 // เช็คจาก DB ว่ามีรูปภาพ (สลิป) ใน conversation นี้หรือไม่
@@ -733,7 +498,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
   //    OA ยังไม่ต่อบริษัท (companyIdHint ว่าง) → btConfig=null → ไม่ส่ง bonustime เลย (ไม่ไป databet)
   const btConfig = await loadBonusConfig(companyIdHint, tenantId);
   // คำถามเกี่ยวกับเกมแตก / bonustime / อัตราชนะ → "ตอบเสมอ" ไม่นับ repeat-abuse ไม่ handoff
-  const isGameQuery = isHotGamesQuery(normalized.content) || (btConfig ? matchBonusTimeKeyword(normalized.content, btConfig) : false);
+  const isGameQuery = btConfig ? matchBonusTimeKeyword(normalized.content, btConfig) : false;
 
   // ════════════════════════════════════════════════════════════════════════════
   // 🛡️ กันสแปม/มือบ่อนถามซ้ำความหมายเดิม ≥10 ครั้ง/นาที → ตอบ auto ไม่เรียก AI (ประหยัด token)
@@ -765,7 +530,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
 
   // ✅ BONUS TIME fast-path: ลูกค้าพิมพ์ bonustime หรือ "ถามหาเกมแตก/เกมไหนดี" → โชว์การ์ด BONUS TIME ทันที
   //    (แทนที่ลิสต์ข้อความแนะนำเกมแบบเดิม — ตอนนี้เกมแตกทุกแบบเด้งเป็นกล่อง BONUS TIME)
-  if (btConfig && (matchBonusTimeKeyword(normalized.content, btConfig) || isHotGamesQuery(normalized.content))) {
+  if (btConfig && matchBonusTimeKeyword(normalized.content, btConfig)) {
     const ctx: BonusCtx = {
       tenantId, conversation, contact, userId,
       replyToken: normalized.replyToken || null, accessToken, config: btConfig,
@@ -829,55 +594,6 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
     return;
   }
 
-
-  // ✅ ตรวจสอบ: เครดิตฟรี → ตอบกลับว่าไม่มีบริการและให้รออัปเดต โดยบอทยังดูแลอยู่
-  if (isFreeCreditQuery(normalized.content)) {
-    const reply = `ตอนนี้ยังไม่มีบริการเครดิตฟรีนะคะ ถ้ามีช่วงไหน เดี๋ยวแอดมินแจ้งให้ทราบนะคะ 🙏😊`;
-    try {
-      if (normalized.replyToken) {
-        await sendLineReply(normalized.replyToken, [lineTextMessage(reply)], accessToken);
-      } else {
-        await sendLinePush(userId, [lineTextMessage(reply)], accessToken);
-      }
-      const dbMsg = await prisma.message.create({
-        data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: reply },
-      });
-      emitToTenant(tenantId, 'new_message', {
-        conversationId: conversation.id,
-        message: { ...dbMsg, senderType: 'bot' },
-        contact, channel: 'line',
-      });
-    } catch (e: any) {
-      console.warn(`[LINE Bot] free credit reply failed:`, e.message);
-    }
-    return;
-  }
-
-  // 💡 โปรโมชั่น: ไม่ดักตอบด้วยข้อความฮาร์ดโค้ดแล้ว — ปล่อยให้ไหลไปหา AI (processBotMessage)
-  //    ซึ่งจะดึงโปร/ข้อมูลธุรกิจจาก "ระบบ" (ตั้งค่าต่อบริษัทในหน้า AI Bot → businessInfo)
-
-  // ✅ ตรวจสอบ: ลูกค้าหมดเงิน / ไม่มีเงิน → ตอบใจเย็นๆ ชวนพักก่อน
-  if (isOutOfMoney(normalized.content)) {
-    const reply = OUT_OF_MONEY_REPLIES[Math.floor(Math.random() * OUT_OF_MONEY_REPLIES.length)];
-    try {
-      if (normalized.replyToken) {
-        await sendLineReply(normalized.replyToken, [lineTextMessage(reply)], accessToken);
-      } else {
-        await sendLinePush(userId, [lineTextMessage(reply)], accessToken);
-      }
-      const dbMsg = await prisma.message.create({
-        data: { conversationId: conversation.id, tenantId, senderType: 'bot', type: 'text', content: reply },
-      });
-      emitToTenant(tenantId, 'new_message', {
-        conversationId: conversation.id,
-        message: { ...dbMsg, senderType: 'bot' },
-        contact, channel: 'line',
-      });
-    } catch (e: any) {
-      console.warn(`[LINE Bot] out-of-money reply failed:`, e.message);
-    }
-    return; // bot ยังดูแลอยู่ ไม่ handoff — เผื่ออย่าให้ลูกค้าเติมเงินโดยอัตโนมัติ
-  }
 
   // ✅ ตรวจสอบ: เงินไม่เข้า / ถอนไม่ได้ → ตอบขอยูสเซอร์ + ถ้ามีสลิปแล้ว handoff ทันที
   const paymentIssue = isPaymentIssue(normalized.content);
@@ -952,11 +668,16 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
 
     // 💾 เก็บข้อมูลลูกค้าจากข้อความอัตโนมัติ (ชื่อ/เบอร์/ธนาคาร/บัญชี/ยูส)
     //    รอผลก่อนตอบ เพื่อให้บอทเห็นข้อมูลล่าสุด (เช่น ลูกค้าเพิ่งพิมพ์ข้อมูลสมัคร)
+    // บอทเพิ่งขอข้อมูลสมัครไปหรือเปล่า (ดูจากข้อความล่าสุดของฝั่งเรา)
+    const lastBotMsg = [...conversationHistory].reverse().find(m => m.role === 'assistant')?.content || '';
+    const inRegisterFlow = /✅|รบกวนลูกค้าแจ้งข้อมูล|ขอเพิ่มอีกนิด|ยืนยันว่าข้อมูลถูกต้อง/.test(lastBotMsg);
     let profileForBot = readProfile(contact as any);
     if (mightContainCustomerInfo(normalized.content)) {
       const captured = await captureCustomerInfo({
         tenantId, contactId: contact.id,
         recentMessages: [...conversationHistory.slice(-5), { role: 'user', content: normalized.content }],
+        registrationFlow: inRegisterFlow || isRegisterIntent(normalized.content),
+        channel: 'line',
       });
       if (captured) profileForBot = captured;
     }
@@ -964,10 +685,6 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
 
     // ═══ เรื่องสมัครสมาชิก — logic ตายตัว ไม่พึ่ง AI ═══
     //  ยังไม่มีข้อมูล → ส่งฟอร์ม ✅ ทั้งชุด | มีบางส่วน → ขอเฉพาะที่ขาด | ครบ → ทวนยืนยัน
-    // บอทเพิ่งขอข้อมูลสมัครไปหรือเปล่า (ดูจากข้อความล่าสุดของฝั่งเรา)
-    const lastBotMsg = [...conversationHistory].reverse().find(m => m.role === 'assistant')?.content || '';
-    const inRegisterFlow = /✅|รบกวนลูกค้าแจ้งข้อมูล|ขอเพิ่มอีกนิด|ยืนยันว่าข้อมูลถูกต้อง/.test(lastBotMsg);
-
     let reply: string;
     const shouldHandoff = false;
     if (isRegisterIntent(normalized.content) && !mightContainCustomerInfo(normalized.content)) {
@@ -990,7 +707,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
           depositCount: (contact as any).depositCount,
         },
         conversation.companyId,
-        { bonusTimeActive: !!btConfig, profileContext },
+        { bonusTimeActive: !!btConfig, profileContext, channel: 'line' },
       );
       reply = r.reply;
       void r.shouldHandoff;
@@ -1059,7 +776,7 @@ async function processLineEvent(tenantId: string, event: any, accessToken: strin
   } catch (aiError: any) {
     console.error('[LINE Bot] ❌ AI error:', aiError?.message || aiError);
     try {
-      const smartFallback = getSmartFallback(normalized.content);
+      const smartFallback = getSmartFallback();
       if (normalized.replyToken) {
         await sendLineReply(normalized.replyToken, [lineTextMessage(smartFallback)], accessToken);
       } else {
@@ -1105,15 +822,9 @@ async function verifySlipFromLine(opts: {
     // ── กำหนดข้อความตอบลูกค้าตามผลการตรวจ ──────────────────────────────────
     let customerMsg: string | null = null;
 
-    if (result.status === 'verified') {
-      // ✅ ตรวจผ่าน — แจ้งรอเครดิตเข้า
-      customerMsg = `รับทราบค่ะ 💕 กรุณารอยอดเครดิตเข้าระบบอัตโนมัตินะคะ ภายใน 1-2 นาที ⏳\nหากเครดิตยังไม่เข้า ติดต่อแอดได้เลยนะคะ 🙏`;
-    } else if (result.status === 'duplicate') {
-      // ⚠️ สลิปซ้ำ
-      customerMsg = `⚠️ สลิปนี้เคยส่งมาแล้วค่ะ กรุณาส่งสลิปใหม่ที่ยังไม่เคยใช้นะคะ 🙏`;
-    } else if (result.status === 'fake') {
-      // ❌ สลิปปลอม / ผิดปกติ
-      customerMsg = `⚠️ สลิปนี้ไม่ผ่านการตรวจสอบค่ะ กรุณาส่งสลิปจริงจากแอปธนาคารนะคะ 🙏`;
+    if (result.status === 'verified' || result.status === 'duplicate' || result.status === 'fake' || result.status === 'error') {
+      // ใช้ผลจากตัวตรวจโดยตรง ไม่ฝังเวลาเครดิต/เงื่อนไขธุรกิจไว้ใน webhook
+      customerMsg = result.message;
     } else if (result.status === 'not_slip') {
       // 🖼️ ลูกค้าส่งรูปที่ "ไม่ใช่สลิป" → ให้ AI ดูรูปแล้วช่วยแก้ปัญหาให้ตรงจุด
       try {
@@ -1131,7 +842,7 @@ async function verifySlipFromLine(opts: {
             const lastText = [...recent].reverse().find((m: any) => m.senderType === 'customer' && m.type === 'text')?.content || '';
             const assist = await visionAssistReply({
               tenantId, companyId: convRow?.companyId,
-              imageBase64: base64, conversationHistory: history, lastCustomerText: lastText,
+              imageBase64: base64, conversationHistory: history, lastCustomerText: lastText, channel: 'line',
             });
             if (!assist.isSlip && assist.reply) customerMsg = assist.reply;
           }
@@ -1140,8 +851,6 @@ async function verifySlipFromLine(opts: {
         console.warn('[SlipVerify] vision assist failed:', e.message);
       }
     }
-    // error → ไม่ตอบลูกค้า (ระบบมีปัญหา → เงียบ)
-
     // ── ส่งข้อความกลับลูกค้า (เฉพาะกรณีที่มี customerMsg) ──────────────────
     if (customerMsg) {
       try {

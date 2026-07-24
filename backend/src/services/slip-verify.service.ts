@@ -13,7 +13,7 @@ const SLIPOK_BRANCH   = process.env.SLIPOK_BRANCH_ID || '';
 const SLIPS_DIR       = path.resolve(__dirname, '../../uploads/slips');
 
 const aiClient = new OpenAI({
-  apiKey:  process.env.COMETAPI_KEY || '',
+  apiKey:  process.env.COMETAPI_GEMINI_KEY || process.env.COMETAPI_KEY || '',
   baseURL: process.env.COMETAPI_BASE_URL || 'https://api.cometapi.com/v1',
 });
 const VISION_MODEL = process.env.COMETAPI_MODEL || 'gpt-4o';
@@ -209,7 +209,7 @@ export async function verifyWithAIVision(imageBuffer: Buffer): Promise<AIVisionR
     const base64 = imageBuffer.toString('base64');
     const imageUrl = `data:image/jpeg;base64,${base64}`;
 
-    const response = await aiClient.chat.completions.create({
+    const request: any = {
       model: VISION_MODEL,
       messages: [
         {
@@ -221,8 +221,9 @@ export async function verifyWithAIVision(imageBuffer: Buffer): Promise<AIVisionR
         },
       ],
       max_tokens: 500,
-      temperature: 0.1,
-    });
+    };
+    if (!/^gemini-3\.6-flash(?:$|-)/i.test(VISION_MODEL)) request.temperature = 0.1;
+    const response = await aiClient.chat.completions.create(request);
 
     const raw = response.choices[0]?.message?.content?.trim() || '';
     // Clean markdown code blocks if present
@@ -245,16 +246,19 @@ export async function verifyWithAIVision(imageBuffer: Buffer): Promise<AIVisionR
 // ═══════════════════════════════════════════════════════════════════════════════
 // 6. Main Orchestrator — verifySlip
 // ═══════════════════════════════════════════════════════════════════════════════
-interface VerifySlipOptions {
+export interface VerifySlipOptions {
   tenantId: string;
   conversationId: string;
   contactId: string;
   messageId: string;
-  accessToken: string;
-  userId: string; // LINE userId for push response
+  accessToken?: string;
+  userId?: string; // LINE userId for push response
+  buffer?: Buffer;
+  filePath?: string;
+  language?: 'th' | 'lo';
 }
 
-interface VerifySlipResult {
+export interface VerifySlipResult {
   status: 'verified' | 'fake' | 'duplicate' | 'not_slip' | 'error';
   verifiedBy: string;
   amount?: number;
@@ -267,23 +271,31 @@ interface VerifySlipResult {
 }
 
 export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipResult> {
-  const { tenantId, conversationId, contactId, messageId, accessToken } = opts;
+  const { tenantId, conversationId, contactId, messageId, accessToken, language = 'th' } = opts;
 
   console.log(`[SlipVerify] 🔍 Starting verification: tenant=${tenantId} msg=${messageId}`);
 
   // ── Step 1: Download image ──────────────────────────────────────────────
   let buffer: Buffer;
   let filePath: string;
-  try {
-    const dl = await downloadLineImage(messageId, accessToken);
-    buffer = dl.buffer;
-    filePath = dl.filePath;
-  } catch (err: any) {
-    console.error(`[SlipVerify] ❌ Download failed: ${err.message}`);
-    return {
-      status: 'error', verifiedBy: 'auto',
-      message: 'ไม่สามารถดาวน์โหลดรูปได้ค่ะ กรุณาส่งใหม่อีกครั้งนะคะ 🙏',
-    };
+  if (opts.buffer && opts.filePath) {
+    buffer = opts.buffer;
+    filePath = opts.filePath;
+  } else {
+    try {
+      if (!accessToken) throw new Error('LINE access token is required');
+      const dl = await downloadLineImage(messageId, accessToken);
+      buffer = dl.buffer;
+      filePath = dl.filePath;
+    } catch (err: any) {
+      console.error(`[SlipVerify] ❌ Download failed: ${err.message}`);
+      return {
+        status: 'error', verifiedBy: 'auto',
+        message: language === 'lo'
+          ? 'ບໍ່ສາມາດດາວໂຫຼດຮູບໄດ້ເຈົ້າ ລົບກວນສົ່ງໃໝ່ອີກຄັ້ງ 🙏'
+          : 'ไม่สามารถดาวน์โหลดรูปได้ค่ะ กรุณาส่งใหม่อีกครั้งนะคะ 🙏',
+      };
+    }
   }
 
   // ── Step 2: Hash + Duplicate check ──────────────────────────────────────
@@ -292,13 +304,6 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
 
   if (dupCheck.isDuplicate) {
     console.log(`[SlipVerify] ⚠️ Duplicate slip detected! original=${dupCheck.originalId}`);
-
-    const timeAgo = dupCheck.originalDate
-      ? Math.round((Date.now() - dupCheck.originalDate.getTime()) / 60000)
-      : null;
-    const timeStr = timeAgo !== null
-      ? (timeAgo < 60 ? `${timeAgo} นาทีก่อน` : `${Math.round(timeAgo / 60)} ชม.ก่อน`)
-      : '';
 
     const record = await prisma.slipVerification.create({
       data: {
@@ -315,7 +320,9 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
 
     return {
       status: 'duplicate', verifiedBy: 'auto',
-      message: `⚠️ สลิปนี้เคยส่งมาแล้วค่ะ (${timeStr}) กรุณาส่งสลิปใหม่ที่ยังไม่เคยใช้นะคะ`,
+      message: language === 'lo'
+        ? 'ແອດມິນໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ກຳລັງດຳເນີນການກວດສອບໃຫ້ ລໍຖ້າຈັກຄູ່ເຈົ້າ'
+        : 'แอดมินได้รับสลิปแล้วค่ะ กำลังดำเนินการตรวจสอบให้ รอสักครู่นะคะ',
       record,
     };
   }
@@ -342,21 +349,27 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
 
     if (aiResult.suspicious) {
       // SlipOK OK แต่ AI สงสัย → ยังถือว่าผ่านแต่แจ้ง admin
-      message = `✅ สลิปผ่านการตรวจสอบแล้วค่ะ\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}\n🔖 Ref: ${finalTransRef}`;
+      message = language === 'lo'
+        ? `✅ ສະລິບຜ່ານການກວດສອບແລ້ວເຈົ້າ\n💰 ${finalAmount?.toLocaleString() || '?'}\n🏦 ${finalBankFrom} → ${finalBankTo}\n🔖 Ref: ${finalTransRef}`
+        : `✅ สลิปผ่านการตรวจสอบแล้วค่ะ\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}\n🔖 Ref: ${finalTransRef}`;
     } else {
-      message = `✅ สลิปผ่านการตรวจสอบแล้วค่ะ\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}\n🔖 Ref: ${finalTransRef}`;
+      message = language === 'lo'
+        ? `✅ ສະລິບຜ່ານການກວດສອບແລ້ວເຈົ້າ\n💰 ${finalAmount?.toLocaleString() || '?'}\n🏦 ${finalBankFrom} → ${finalBankTo}\n🔖 Ref: ${finalTransRef}`
+        : `✅ สลิปผ่านการตรวจสอบแล้วค่ะ\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}\n🔖 Ref: ${finalTransRef}`;
     }
   } else if (aiResult.success) {
     if (!aiResult.isSlip) {
       // AI บอกว่าไม่ใช่สลิป
       status = 'not_slip';
       verifiedBy = 'ai';
-      message = `🖼️ รูปนี้ไม่ใช่สลิปโอนเงินค่ะ กรุณาส่งสลิปจากแอปธนาคารนะคะ 🙏`;
+      message = '';
     } else if (aiResult.suspicious) {
       // AI คิดว่าน่าสงสัย
       status = 'fake';
       verifiedBy = 'ai';
-      message = `⚠️ สลิปนี้ไม่ผ่านการตรวจสอบค่ะ\nเหตุผล: ${aiResult.reason || 'พบความผิดปกติ'}\nกรุณาส่งสลิปจริงจากแอปธนาคารนะคะ`;
+      message = language === 'lo'
+        ? 'ແອດມິນໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ກຳລັງກວດສອບລາຍລະອຽດເພີ່ມເຕີມໃຫ້'
+        : 'แอดมินได้รับสลิปแล้วค่ะ กำลังตรวจสอบรายละเอียดเพิ่มเติมให้ รอสักครู่นะคะ';
     } else {
       // AI OK แต่ SlipOK ไม่ได้
       status = 'verified';
@@ -364,16 +377,22 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
       finalAmount = aiResult.amount;
       finalBankFrom = aiResult.bankFrom || '';
       finalBankTo = aiResult.bankTo || '';
-      message = `✅ สลิปผ่านการตรวจสอบแล้วค่ะ (AI)\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}`;
+      message = language === 'lo'
+        ? `✅ ສະລິບຜ່ານການກວດສອບແລ້ວເຈົ້າ\n💰 ${finalAmount?.toLocaleString() || '?'}\n🏦 ${finalBankFrom} → ${finalBankTo}`
+        : `✅ สลิปผ่านการตรวจสอบแล้วค่ะ (AI)\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}`;
       if (aiResult.confidence === 'low') {
-        message += `\n⚠️ คุณภาพรูปต่ำ เจ้าหน้าที่จะตรวจสอบเพิ่มเติมค่ะ`;
+        message += language === 'lo'
+          ? '\n⚠️ ຮູບບໍ່ຊັດ ແອດມິນຈະກວດສອບເພີ່ມເຕີມໃຫ້ເຈົ້າ'
+          : '\n⚠️ คุณภาพรูปต่ำ เจ้าหน้าที่จะตรวจสอบเพิ่มเติมค่ะ';
       }
     }
   } else {
     // ทั้ง 2 ตัวตรวจไม่ได้
     status = 'error';
     verifiedBy = 'auto';
-    message = `🧾 ได้รับสลิปแล้วค่ะ ระบบยังตรวจสอบไม่ได้ตอนนี้ เจ้าหน้าที่จะตรวจให้นะคะ 🙏`;
+    message = language === 'lo'
+      ? '🧾 ໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ແອດມິນກຳລັງກວດສອບໃຫ້ 🙏'
+      : '🧾 ได้รับสลิปแล้วค่ะ ระบบยังตรวจสอบไม่ได้ตอนนี้ เจ้าหน้าที่จะตรวจให้นะคะ 🙏';
   }
 
   // ── Step 6: Save to database ────────────────────────────────────────────

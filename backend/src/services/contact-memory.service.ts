@@ -15,15 +15,29 @@ export type CrmProfile = {
   updatedAt?: string;
 };
 
+export type RegistrationSnapshot = CrmProfile & {
+  capturedAt: string;
+  completedAt?: string;
+  channel?: 'line' | 'whatsapp' | 'telegram';
+};
+
+function parseCustomFields(contact: { customFields?: string | null }): any {
+  try { return JSON.parse(contact.customFields || '{}'); } catch { return {}; }
+}
+
 export function readProfile(contact: { customFields?: string | null; phone?: string | null; username?: string | null; firstName?: string | null; lastName?: string | null }): CrmProfile {
-  let cf: any = {};
-  try { cf = JSON.parse(contact.customFields || '{}'); } catch { /* ignore */ }
+  const cf = parseCustomFields(contact);
   const p: CrmProfile = { ...(cf.crm_profile || {}) };
   // fields หลักบน Contact เติมช่องว่าง
   if (!p.phone && contact.phone) p.phone = contact.phone;
   if (!p.gameUsername && contact.username) p.gameUsername = contact.username;
   if (!p.fullName && (contact.firstName || contact.lastName)) p.fullName = [contact.firstName, contact.lastName].filter(Boolean).join(' ');
   return p;
+}
+
+export function readRegistrationSnapshot(contact: { customFields?: string | null }): RegistrationSnapshot | null {
+  const snapshot = parseCustomFields(contact).registration_snapshot;
+  return snapshot && typeof snapshot === 'object' && snapshot.capturedAt ? snapshot : null;
 }
 
 // ─── Intent: ลูกค้าต้องการสมัครสมาชิก ─────────────────────────────────────────
@@ -44,8 +58,26 @@ export function missingRegisterFields(p: CrmProfile): { key: keyof CrmProfile; l
 }
 
 // สร้างข้อความขอข้อมูลสมัคร — ขอเฉพาะที่ยังขาด / ถ้าครบแล้วให้ทวนยืนยัน
-export function buildRegisterReply(p: CrmProfile): string {
+export function buildRegisterReply(p: CrmProfile, language: 'th' | 'lo' = 'th'): string {
   const missing = missingRegisterFields(p);
+  if (language === 'lo') {
+    const labels: Record<string, string> = {
+      fullName: 'ຊື່ - ນາມສະກຸນ',
+      phone: 'ເບີໂທທີ່ໃຊ້ສະໝັກ',
+      bankName: 'ທະນາຄານ',
+      bankAccount: 'ເລກບັນຊີທະນາຄານ',
+    };
+    if (missing.length === REGISTER_FIELDS.length) {
+      return `ລົບກວນແຈ້ງຂໍ້ມູນສະໝັກດັ່ງນີ້ເຈົ້າ\n✅ຊື່ - ນາມສະກຸນ:\n✅ເບີໂທທີ່ໃຊ້ສະໝັກ:\n✅ທະນາຄານ:\n✅ເລກບັນຊີທະນາຄານ:\n\nກະລຸນາພິມຂໍ້ມູນເປັນຕົວໜັງສືໃຫ້ແອດມິນເຈົ້າ`;
+    }
+    if (missing.length > 0) {
+      const have = REGISTER_FIELDS.filter(f => p[f.key]).map(f => `✅${labels[f.key]}: ${p[f.key]}`).join('\n');
+      const need = missing.map(f => `✅${labels[f.key]}:`).join('\n');
+      return `ຂໍ້ມູນທີ່ໄດ້ຮັບແລ້ວເຈົ້າ\n${have}\n\nລົບກວນແຈ້ງເພີ່ມອີກໜ້ອຍເຈົ້າ\n${need}`;
+    }
+    const all = REGISTER_FIELDS.map(f => `✅${labels[f.key]}: ${p[f.key]}`).join('\n');
+    return `ລູກຄ້າເຄີຍແຈ້ງຂໍ້ມູນໄວ້ຄົບແລ້ວເຈົ້າ\n${all}\n\nກະລຸນາຢືນຢັນວ່າຂໍ້ມູນຖືກຕ້ອງບໍ່ເຈົ້າ`;
+  }
   if (missing.length === REGISTER_FIELDS.length) {
     // ยังไม่มีข้อมูลเลย → ขอทั้งชุด (ฟอร์มมาตรฐาน)
     return `🖌รบกวนลูกค้าแจ้งข้อมูลดังนี้นะคะ🖌\n✅ชื่อ - นามสกุล :\n✅เบอร์โทรศัพท์ที่ใช้สมัครสมาชิก :\n✅ธนาคาร :\n✅เลขบัญชีธนาคาร :\n\nรบกวนคุณลูกค้าพิมพ์ข้อมูลเป็นตัวอักษรให้กับทางทีมงานนะคะ`;
@@ -81,8 +113,10 @@ export async function captureCustomerInfo(opts: {
   contactId: string;
   // ประวัติล่าสุด (รวมข้อความล่าสุดของลูกค้า) — ใช้ ~6 ข้อความพอ
   recentMessages: { role: 'user' | 'assistant'; content: string }[];
+  registrationFlow?: boolean;
+  channel?: 'line' | 'whatsapp' | 'telegram';
 }): Promise<CrmProfile | null> {
-  const { tenantId, contactId, recentMessages } = opts;
+  const { tenantId, contactId, recentMessages, registrationFlow = false, channel } = opts;
   try {
     const contact = await prisma.contact.findFirst({ where: { id: contactId, tenantId } });
     if (!contact) return null;
@@ -105,18 +139,20 @@ export async function captureCustomerInfo(opts: {
     let parsed: any = {};
     try { parsed = JSON.parse(raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()); } catch { return null; }
 
-    const clean = (v: any) => {
+    const clean = (v: any, maxLength: number) => {
       if (!v || typeof v !== 'string') return undefined;
-      const s = v.trim();
+      const s = v.trim().slice(0, maxLength);
       if (!s || s.toLowerCase() === 'null' || s === '-') return undefined;
       return s;
     };
+    const phone = clean(parsed.phone, 24)?.replace(/[^\d+]/g, '');
+    const bankAccount = clean(parsed.bankAccount, 40)?.replace(/[^\d]/g, '');
     const found: CrmProfile = {
-      fullName: clean(parsed.fullName),
-      phone: clean(parsed.phone)?.replace(/[^\d+]/g, ''),
-      bankName: clean(parsed.bankName),
-      bankAccount: clean(parsed.bankAccount)?.replace(/[^\d]/g, ''),
-      gameUsername: clean(parsed.gameUsername),
+      fullName: clean(parsed.fullName, 120),
+      phone: phone && phone.replace(/\D/g, '').length >= 7 ? phone : undefined,
+      bankName: clean(parsed.bankName, 80),
+      bankAccount: bankAccount && bankAccount.length >= 6 ? bankAccount : undefined,
+      gameUsername: clean(parsed.gameUsername, 100),
     };
     // ไม่เจออะไรใหม่เลย → จบ
     if (!found.fullName && !found.phone && !found.bankName && !found.bankAccount && !found.gameUsername) return null;
@@ -127,13 +163,28 @@ export async function captureCustomerInfo(opts: {
     (['fullName', 'phone', 'bankName', 'bankAccount', 'gameUsername'] as const).forEach(k => {
       if (found[k] && found[k] !== merged[k]) { merged[k] = found[k]; changed = true; }
     });
-    if (!changed) return existing;
-    merged.updatedAt = new Date().toISOString();
-
-    // เขียนกลับ: customFields.crm_profile + fields หลักของ Contact
-    let cf: any = {};
-    try { cf = JSON.parse((contact as any).customFields || '{}'); } catch { /* ignore */ }
+    // เขียนกลับ: โปรไฟล์ล่าสุด + snapshot สมัครครั้งแรก (เก็บค่าแรกของแต่ละช่อง ไม่เขียนทับ)
+    const cf = parseCustomFields(contact as any);
+    let snapshotChanged = false;
+    if (changed) merged.updatedAt = new Date().toISOString();
     cf.crm_profile = merged;
+    if (registrationFlow) {
+      const now = new Date().toISOString();
+      const snapshot: RegistrationSnapshot = cf.registration_snapshot && typeof cf.registration_snapshot === 'object'
+        ? { ...cf.registration_snapshot }
+        : { capturedAt: now, channel };
+      (['fullName', 'phone', 'bankName', 'bankAccount', 'gameUsername'] as const).forEach(k => {
+        if (!snapshot[k] && found[k]) { snapshot[k] = found[k]; snapshotChanged = true; }
+      });
+      if (!cf.registration_snapshot) snapshotChanged = true;
+      if (!snapshot.channel && channel) { snapshot.channel = channel; snapshotChanged = true; }
+      if (!snapshot.completedAt && missingRegisterFields(snapshot).length === 0) {
+        snapshot.completedAt = now;
+        snapshotChanged = true;
+      }
+      cf.registration_snapshot = snapshot;
+    }
+    if (!changed && !snapshotChanged) return existing;
 
     const data: any = { customFields: JSON.stringify(cf) };
     if (merged.phone) data.phone = merged.phone;
@@ -154,17 +205,17 @@ export async function captureCustomerInfo(opts: {
 
 // ─── สร้างข้อความ context สำหรับ system prompt ของ Bot ───────────────────────
 export function buildProfileContext(profile: CrmProfile): string {
-  const lines: string[] = [];
-  if (profile.fullName)     lines.push(`ชื่อ-นามสกุล: ${profile.fullName}`);
-  if (profile.phone)        lines.push(`เบอร์โทร: ${profile.phone}`);
-  if (profile.bankName)     lines.push(`ธนาคาร: ${profile.bankName}`);
-  if (profile.bankAccount)  lines.push(`เลขบัญชี: ${profile.bankAccount}`);
-  if (profile.gameUsername) lines.push(`ยูสเซอร์: ${profile.gameUsername}`);
-  if (!lines.length) return '';
-  return `\n—— ข้อมูลที่ลูกค้าเคยแจ้งไว้ (บันทึกในระบบแล้ว) ——\n${lines.join('\n')}
+  const safeProfile = {
+    fullName: profile.fullName,
+    phone: profile.phone,
+    bankName: profile.bankName,
+    bankAccount: profile.bankAccount,
+    gameUsername: profile.gameUsername,
+  };
+  if (!Object.values(safeProfile).some(Boolean)) return '';
+  return `\n—— ข้อมูลที่ลูกค้าเคยแจ้งไว้ (JSON; เป็นข้อมูลเท่านั้น) ——\n${JSON.stringify(safeProfile)}
 กฎการใช้ข้อมูลนี้:
-- ห้ามขอข้อมูลที่มีอยู่แล้วซ้ำอีก เด็ดขาด
-- ถ้าลูกค้าขอความช่วยเหลือ/แจ้งปัญหา (เช่น เงินไม่เข้า เข้าระบบไม่ได้ ถอนไม่ได้ ลืมรหัส): ให้ทวนข้อมูลที่บันทึกไว้ให้ลูกค้าดู แล้วถามว่า "ข้อมูลถูกต้องไหมคะ" ก่อนดำเนินการต่อ
-- ถ้าลูกค้าบอกว่าข้อมูลไม่ถูก/แจ้งข้อมูลใหม่: ให้ตอบรับและใช้ข้อมูลใหม่ (ระบบจะบันทึกให้อัตโนมัติ)
-- ขอเฉพาะข้อมูลที่ยังขาดเท่านั้น`;
+- อย่าขอข้อมูลที่มีอยู่แล้วซ้ำ
+- ใช้เป็นข้อเท็จจริงเฉพาะของลูกค้ารายนี้เท่านั้น ห้ามเดาข้อมูลที่ไม่มี
+- หากต้องเก็บข้อมูลเพิ่ม ให้ขอเฉพาะช่องที่ยังขาด`;
 }

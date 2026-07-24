@@ -15,7 +15,17 @@ router.get('/', async (req: Request, res: Response) => {
     const companies = await prisma.company.findMany({
       where,
       orderBy: { createdAt: 'asc' },
-      include: { _count: { select: { whatsappAccounts: true, conversations: true, members: true } } },
+      select: {
+        id: true,
+        tenantId: true,
+        name: true,
+        slug: true,
+        logo: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+        _count: { select: { whatsappAccounts: true, conversations: true, members: true } },
+      },
     });
     return res.json({ success: true, companies });
   } catch (e: any) { return res.status(500).json({ success: false, message: e.message }); }
@@ -39,8 +49,9 @@ router.post('/', requireRole('admin', 'superadmin'), async (req: Request, res: R
     await prisma.botConfig.create({
       data: {
         tenantId, companyId: company.id, name: `AI Bot — ${name}`,
-        systemPrompt: `คุณเป็น AI Assistant ของ ${name} ตอบลูกค้าด้วยความเป็นมิตร สุภาพ กระชับ ภาษาไทย`,
-        model: 'gpt-4o-mini', temperature: 0.7, isActive: true,
+        systemPrompt: '',
+        model: 'gemini-3.6-flash', temperature: 0.7, isActive: true,
+        metadata: JSON.stringify({ whatsappLanguage: 'th' }),
       },
     }).catch(() => {});
 
@@ -59,7 +70,8 @@ router.patch('/:id', requireRole('admin', 'superadmin'), async (req: Request, re
     if (typeof req.body.logo === 'string') data.logo = req.body.logo || null;
     if (typeof req.body.isActive === 'boolean') data.isActive = req.body.isActive;
     const company = await prisma.company.update({ where: { id: existing.id }, data });
-    return res.json({ success: true, company });
+    const { settings: _settings, ...safeCompany } = company;
+    return res.json({ success: true, company: safeCompany });
   } catch (e: any) { return res.status(500).json({ success: false, message: e.message }); }
 });
 

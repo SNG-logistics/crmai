@@ -20,6 +20,7 @@ export const translations = {
   nav_channels:        { th: 'ตั้งค่าช่องทาง',       lo: 'ຕັ້ງຄ່າຊ່ອງທາງ' },
   nav_companies:       { th: 'บริษัท',                lo: 'ບໍລິສັດ' },
   nav_whatsapp:        { th: 'WhatsApp',             lo: 'WhatsApp' },
+  nav_backend_api:     { th: 'API ตรวจหลังบ้าน',     lo: 'API ກວດຫຼັງບ້ານ' },
   nav_team:            { th: 'ทีม',                  lo: 'ທີມງານ' },
   nav_profile:         { th: 'โปรไฟล์ & 2FA',        lo: 'ໂປຣໄຟລ໌ & 2FA' },
   nav_audit_logs:      { th: 'ประวัติระบบ',          lo: 'ປະຫວັດລະບົບ' },

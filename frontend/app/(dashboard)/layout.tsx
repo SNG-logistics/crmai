@@ -29,6 +29,7 @@ const NAV_KEYS = [
   { href: '/settings/channels', icon: '📡', key: 'nav_channels'  },
   { href: '/settings/companies',icon: '🏢', key: 'nav_companies'  },
   { href: '/settings/whatsapp',icon: '💚', key: 'nav_whatsapp'   },
+  { href: '/settings/backend-api',icon: '🔌', key: 'nav_backend_api' },
   { href: '/settings/users',   icon: '👥', key: 'nav_team'       },
   { href: '/settings/profile',  icon: '👤', key: 'nav_profile'    },
   { href: '/settings/audit-logs',icon: '📋', key: 'nav_audit_logs' },

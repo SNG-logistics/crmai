@@ -74,7 +74,7 @@ export default function WhatsAppSettingsPage() {
 
   // ── AI settings state (per company) ──────────────────────────────────────────
   const [ai, setAi] = useState({ isActive: true, model: 'gemini-3.6-flash', temperature: 0.7, systemPrompt: '' });
-  const [ext, setExt] = useState({ welcomeMessage: '', handoffKeywords: '' });
+  const [ext, setExt] = useState({ welcomeMessage: '', handoffKeywords: '', whatsappLanguage: 'th' as 'th' | 'lo' });
   const [aiLoading, setAiLoading] = useState(true);
   const [aiSaving, setAiSaving] = useState(false);
   const [testMsg, setTestMsg] = useState('');
@@ -146,10 +146,11 @@ export default function WhatsAppSettingsPage() {
       setExt({
         welcomeMessage: ex.welcomeMessage || '',
         handoffKeywords: Array.isArray(ex.handoffKeywords) ? ex.handoffKeywords.join(', ') : (ex.handoffKeywords || ''),
+        whatsappLanguage: ex.whatsappLanguage === 'lo' ? 'lo' : 'th',
       });
     } catch {
       setAi({ isActive: true, model: 'gemini-3.6-flash', temperature: 0.7, systemPrompt: '' });
-      setExt({ welcomeMessage: '', handoffKeywords: '' });
+      setExt({ welcomeMessage: '', handoffKeywords: '', whatsappLanguage: 'th' });
     } finally {
       setAiLoading(false);
     }
@@ -276,6 +277,7 @@ export default function WhatsAppSettingsPage() {
         companyId,
         welcomeMessage: ext.welcomeMessage,
         handoffKeywords: ext.handoffKeywords.split(',').map(s => s.trim()).filter(Boolean),
+        whatsappLanguage: ext.whatsappLanguage,
       });
       toast.success('✅ บันทึกการตั้งค่า AI แล้ว');
     } catch (e: any) {
@@ -289,7 +291,7 @@ export default function WhatsAppSettingsPage() {
     if (!testMsg.trim() || !companyId) return;
     setTesting(true); setTestReply('');
     try {
-      const r = await api.post('/bot/test', { companyId, message: testMsg });
+      const r = await api.post('/bot/test', { companyId, message: testMsg, channel: 'whatsapp' });
       setTestReply(r.data.reply || '(ไม่มีคำตอบ)');
     } catch (e: any) {
       setTestReply('❌ ' + (e.response?.data?.message || 'เกิดข้อผิดพลาด'));
@@ -556,6 +558,22 @@ export default function WhatsAppSettingsPage() {
                       onChange={e => setAi({ ...ai, temperature: parseFloat(e.target.value) })} style={{ width: '100%' }} />
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                       <span>0 = ตรงประเด็น แม่นยำ</span><span>1 = หลากหลาย สร้างสรรค์</span>
+                    </div>
+                  </div>
+
+                  {/* WhatsApp response language */}
+                  <div>
+                    <label className="label">ภาษาที่ AI ตอบใน WhatsApp</label>
+                    <select
+                      className="input"
+                      value={ext.whatsappLanguage}
+                      onChange={e => setExt({ ...ext, whatsappLanguage: e.target.value as 'th' | 'lo' })}
+                    >
+                      <option value="th">🇹🇭 ภาษาไทย</option>
+                      <option value="lo">🇱🇦 ພາສາລາວ (ภาษาลาว)</option>
+                    </select>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>
+                      มีผลเฉพาะข้อความที่ AI ตอบผ่าน WhatsApp ของบริษัทนี้
                     </div>
                   </div>
 

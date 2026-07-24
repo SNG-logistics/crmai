@@ -297,19 +297,11 @@ router.post('/:id/enchant', async (req: Request, res: Response) => {
       content: m.content,
     }));
 
-    // เรียนรู้สไตล์การตอบของทีม — ดึงคำตอบล่าสุดของแอดมิน (agent) ทั่วทั้ง tenant
-    const recentAgentMsgs = await prisma.message.findMany({
-      where: { tenantId: req.tenantId!, senderType: 'agent', type: 'text' },
-      orderBy: { createdAt: 'desc' }, take: 8, select: { content: true },
-    });
-    const styleSamples = recentAgentMsgs.map(m => m.content).filter((c: string) => !!c && c.length > 2);
-
     const contact: any = conv.contact;
     const result = await enchantReply({
       adminDraft: draft,
       conversationHistory: history,
       contactProfile: { displayName: contact.displayName, depositCount: contact.depositCount, memberType: contact.memberType },
-      styleSamples,
       tenantId: req.tenantId!,
     });
 
@@ -519,5 +511,4 @@ router.post('/:id/sync-line', async (req: Request, res: Response) => {
 });
 
 export default router;
-
 

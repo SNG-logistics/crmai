@@ -34,6 +34,7 @@ import uploadRoutes from './routes/upload';
 import lineContentRoutes from './routes/line-content';
 import bonusTimeRoutes from './routes/bonustime';
 import quickReplyRoutes from './routes/quick-replies';
+import backendApiRoutes from './routes/backend-api';
 import { initWhatsAppSessions } from './services/whatsapp.service';
 import { startPkmListener } from './services/pkm-listener.service';
 import { isFirebaseEnabled, firebaseInitError } from './lib/firebase-admin';
@@ -151,6 +152,7 @@ app.use('/api/upload',     uploadRoutes);
 app.use('/api/line',       lineContentRoutes);
 app.use('/api/bonustime',  bonusTimeRoutes);
 app.use('/api/quick-replies', quickReplyRoutes);
+app.use('/api/backend-api', backendApiRoutes);
 
 
 

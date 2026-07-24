@@ -319,6 +319,20 @@ function MessageBubble({ msg, contactName, channel }: { msg: Message; contactNam
             >
               ⬇️ ดาวน์โหลด
             </a>
+            {meta?.aiImageAnalysis && (
+              <div style={{ marginTop: 6, padding: '6px 8px', borderRadius: 7, background: 'rgba(6,182,212,.1)', border: '1px solid rgba(6,182,212,.25)', fontSize: '0.68rem', lineHeight: 1.45 }}>
+                <div style={{ color: 'var(--teal)', fontWeight: 700 }}>
+                  {meta.aiImageAnalysis.kind === 'slip'
+                    ? '🧾 AI: สลิป/หลักฐานการโอน'
+                    : meta.aiImageAnalysis.kind === 'problem'
+                      ? '🛠️ AI: รูปปัญหาของลูกค้า'
+                      : '🖼️ AI: รูปทั่วไป'}
+                </div>
+                {meta.aiImageAnalysis.summary && (
+                  <div style={{ color: 'var(--text-muted)', marginTop: 2 }}>{meta.aiImageAnalysis.summary}</div>
+                )}
+              </div>
+            )}
             {lightbox && (
               <div
                 onClick={() => setLightbox(false)}
@@ -1254,6 +1268,15 @@ function AiAdminPanel({ conv, messages, onUseDraft, onResolve, onToggleBot }: {
 
   const contact: any = conv.contact;
 
+  const copyText = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success(`คัดลอก${label}แล้ว`);
+    } catch {
+      toast.error('คัดลอกไม่สำเร็จ');
+    }
+  };
+
   const getDrafts = async () => {
     setLoadingDraft(true); setDrafts([]);
     const tid = toast.loading('AI กำลังร่างข้อความ...');
@@ -1455,20 +1478,29 @@ function AiAdminPanel({ conv, messages, onUseDraft, onResolve, onToggleBot }: {
 
             {/* Contact info */}
             {[
-              contact.phone   && { icon: '📞', val: contact.phone },
-              contact.email   && { icon: '✉️', val: contact.email },
-              contact.affiliateCode && { icon: '🤝', val: 'Affiliate: ' + contact.affiliateCode },
-              contact.firstDepositAt && { icon: '💰', val: 'ฝากแรก: ' + new Date(contact.firstDepositAt).toLocaleDateString('th-TH') },
+              contact.phone   && { icon: '📞', label: 'เบอร์โทร', val: contact.phone },
+              contact.email   && { icon: '✉️', label: 'อีเมล', val: contact.email },
+              contact.affiliateCode && { icon: '🤝', label: 'Affiliate', val: contact.affiliateCode },
+              contact.firstDepositAt && { icon: '💰', label: 'ฝากแรก', val: new Date(contact.firstDepositAt).toLocaleDateString('th-TH') },
             ].filter(Boolean).map((item: any, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0', fontSize: '0.78rem', color: 'var(--text-secondary)', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                <span>{item.icon}</span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.val}</span>
+                <span>{item.icon}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{item.label}: {item.val}</span>
+                <button
+                  type="button"
+                  title={`คัดลอก${item.label}`}
+                  onClick={() => copyText(String(item.val), item.label)}
+                  style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontSize: '0.68rem' }}
+                >📋</button>
               </div>
             ))}
 
-            {/* ─── ข้อมูลที่ลูกค้าแจ้งไว้ (บันทึกอัตโนมัติจากแชท) ─── */}
+            {/* ─── ข้อมูลสมัครครั้งแรก: snapshot ไม่ถูกเขียนทับเมื่อแก้โปรไฟล์ภายหลัง ─── */}
             {(() => {
-              let prof: any = {};
-              try { prof = JSON.parse(contact.customFields || '{}')?.crm_profile || {}; } catch { prof = {}; }
+              let customFields: any = {};
+              try { customFields = JSON.parse(contact.customFields || '{}'); } catch { customFields = {}; }
+              const snapshot = customFields.registration_snapshot || null;
+              const prof: any = snapshot || customFields.crm_profile || {};
               const rows = [
                 prof.fullName     && { icon: '🪪', label: 'ชื่อ-สกุล', val: prof.fullName },
                 prof.phone        && { icon: '📱', label: 'เบอร์', val: prof.phone },
@@ -1480,14 +1512,29 @@ function AiAdminPanel({ conv, messages, onUseDraft, onResolve, onToggleBot }: {
               return (
                 <div style={{ marginTop: 12, background: 'var(--bg-tertiary)', borderRadius: 8, padding: '10px 12px' }}>
                   <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--teal)', marginBottom: 6 }}>
-                    💾 ข้อมูลที่ลูกค้าแจ้ง (บันทึกอัตโนมัติ)
-                    {prof.updatedAt && <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6 }}>{new Date(prof.updatedAt).toLocaleDateString('th-TH')}</span>}
+                    {snapshot ? '🧾 ข้อมูลสมัครครั้งแรก' : '💾 ข้อมูลที่ลูกค้าแจ้งล่าสุด'}
+                    {(prof.capturedAt || prof.updatedAt) && (
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 400, marginLeft: 6 }}>
+                        {new Date(prof.capturedAt || prof.updatedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}
+                      </span>
+                    )}
                   </div>
+                  {snapshot?.channel && (
+                    <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: 5 }}>
+                      รับข้อมูลจาก {snapshot.channel === 'whatsapp' ? 'WhatsApp' : snapshot.channel === 'line' ? 'LINE' : 'Telegram'}
+                    </div>
+                  )}
                   {rows.map((r, i) => (
-                    <div key={i} style={{ display: 'flex', gap: 8, padding: '3px 0', fontSize: '0.78rem' }}>
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0', fontSize: '0.78rem', borderBottom: i < rows.length - 1 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
                       <span>{r.icon}</span>
                       <span style={{ color: 'var(--text-muted)', minWidth: 62 }}>{r.label}</span>
-                      <span style={{ color: 'var(--text-secondary)', fontWeight: 600, wordBreak: 'break-all' }}>{r.val}</span>
+                      <span style={{ color: 'var(--text-secondary)', fontWeight: 600, wordBreak: 'break-all', flex: 1 }}>{r.val}</span>
+                      <button
+                        type="button"
+                        title={`คัดลอก${r.label}`}
+                        onClick={() => copyText(String(r.val), r.label)}
+                        style={{ border: '1px solid var(--border)', background: 'transparent', color: 'var(--teal)', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontSize: '0.68rem', flexShrink: 0 }}
+                      >📋</button>
                     </div>
                   ))}
                 </div>
