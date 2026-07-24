@@ -11,7 +11,7 @@ const ROLES = [
   { value: 'admin',       label: '👑 Admin',       desc: 'จัดการระบบทั้งหมด' },
   { value: 'supervisor',  label: '🔵 Supervisor',   desc: 'ดูแล agent และรายงาน' },
   { value: 'agent',       label: '👤 Agent',        desc: 'รับ-ตอบบทสนทนา' },
-  { value: 'bot_manager', label: '🤖 Bot Manager',  desc: 'ตั้งค่า AI Bot' },
+  { value: 'bot_manager', label: '🤖 Bot Manager',  desc: 'ตั้งค่า AI LINE BOT' },
   { value: 'analyst',     label: '📊 Analyst',      desc: 'ดู Analytics เท่านั้น' },
 ];
 

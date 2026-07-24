@@ -24,12 +24,19 @@ export function sanitizeForChat(text: string): string {
 }
 
 const client = new OpenAI({
-  apiKey: process.env.COMETAPI_KEY || '',
+  apiKey: process.env.COMETAPI_GEMINI_KEY || process.env.COMETAPI_KEY || '',
   baseURL: process.env.COMETAPI_BASE_URL || 'https://api.cometapi.com/v1',
 });
 
-const DEFAULT_MODEL = process.env.COMETAPI_MODEL || 'gpt-4o';
-const LIGHT_MODEL   = process.env.COMETAPI_LIGHT_MODEL || 'gpt-4o-mini';
+const DEFAULT_MODEL = process.env.COMETAPI_MODEL || 'gemini-3.6-flash';
+const LIGHT_MODEL   = process.env.COMETAPI_LIGHT_MODEL || 'gemini-3.6-flash';
+
+// Gemini 3.6 Flash deprecated sampling parameters such as temperature.
+// Omit them for this model so the same OpenAI-compatible gateway works
+// without rejecting chat and vision requests.
+function samplingParams(model: string, temperature: number): { temperature?: number } {
+  return /^gemini-3\.6-flash(?:$|-)/i.test(model) ? {} : { temperature };
+}
 
 // ─── Handoff — ต้องเป็นคำสั่งชัดเจน ไม่ใช่แค่คำเดียว ──────────────────────────
 const EXPLICIT_HANDOFF_PHRASES = [
@@ -216,7 +223,10 @@ export async function generateAIResponse(
   for (const m of tryModels) {
     try {
       const response = await client.chat.completions.create({
-        model: m, messages, temperature, max_tokens: maxTokens,
+        model: m,
+        messages,
+        ...samplingParams(m, temperature),
+        max_tokens: maxTokens,
       });
       const out = response.choices[0]?.message?.content?.trim() || '';
       if (out) {
@@ -576,7 +586,7 @@ export async function enchantReply(opts: {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userParts.join('\n\n') },
       ],
-      temperature: 0.7,
+      ...samplingParams(DEFAULT_MODEL, 0.7),
       max_tokens: 600,
       response_format: { type: 'json_object' },
     });
@@ -702,14 +712,15 @@ export async function visionAssistReply(opts: {
   userContent.push({ type: 'image_url', image_url: { url: imageBase64 } });
 
   try {
+    const visionModel = botConfig?.model || DEFAULT_MODEL;
     const resp = await client.chat.completions.create({
-      model: botConfig?.model || DEFAULT_MODEL,
+      model: visionModel,
       messages: [
         { role: 'system', content: systemPrompt },
         ...conversationHistory.slice(-4),
         { role: 'user', content: userContent as any },
       ],
-      temperature: 0.4,
+      ...samplingParams(visionModel, 0.4),
       max_tokens: 350,
       response_format: { type: 'json_object' },
     });

@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "CRM One-Stop Service",
-  description: "ระบบ CRM แบบ One-Stop Service เชื่อมต่อ AI Bot กับ LINE OA และ Telegram",
+  description: "ระบบ CRM แบบ One-Stop Service เชื่อมต่อ AI LINE BOT กับ LINE OA และ Telegram",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -37,4 +37,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-

@@ -29,7 +29,9 @@ interface WaAccount {
 }
 
 const MODEL_OPTIONS = [
-  { value: 'gpt-4o-mini', label: 'GPT-4o mini — เร็ว/ประหยัด (แนะนำ)' },
+  { value: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash — เร็ว/ฉลาด (แนะนำ)' },
+  { value: 'gemini-3-5-flash', label: 'Gemini 3.5 Flash' },
+  { value: 'gpt-4o-mini', label: 'GPT-4o mini — เร็ว/ประหยัด' },
   { value: 'gpt-4o', label: 'GPT-4o — ฉลาดกว่า' },
   { value: 'gpt-4.1-mini', label: 'GPT-4.1 mini' },
   { value: 'gpt-4.1', label: 'GPT-4.1' },
@@ -71,7 +73,7 @@ export default function WhatsAppSettingsPage() {
   const accIdsRef = useRef<Set<string>>(new Set());
 
   // ── AI settings state (per company) ──────────────────────────────────────────
-  const [ai, setAi] = useState({ isActive: true, model: 'gpt-4o-mini', temperature: 0.7, systemPrompt: '' });
+  const [ai, setAi] = useState({ isActive: true, model: 'gemini-3.6-flash', temperature: 0.7, systemPrompt: '' });
   const [ext, setExt] = useState({ welcomeMessage: '', handoffKeywords: '' });
   const [aiLoading, setAiLoading] = useState(true);
   const [aiSaving, setAiSaving] = useState(false);
@@ -136,17 +138,17 @@ export default function WhatsAppSettingsPage() {
       const bot = b.data.bot;
       setAi(bot ? {
         isActive: bot.isActive ?? true,
-        model: bot.model || 'gpt-4o-mini',
+        model: bot.model || 'gemini-3.6-flash',
         temperature: typeof bot.temperature === 'number' ? bot.temperature : 0.7,
         systemPrompt: bot.systemPrompt || '',
-      } : { isActive: true, model: 'gpt-4o-mini', temperature: 0.7, systemPrompt: '' });
+      } : { isActive: true, model: 'gemini-3.6-flash', temperature: 0.7, systemPrompt: '' });
       const ex = e.data.extended || {};
       setExt({
         welcomeMessage: ex.welcomeMessage || '',
         handoffKeywords: Array.isArray(ex.handoffKeywords) ? ex.handoffKeywords.join(', ') : (ex.handoffKeywords || ''),
       });
     } catch {
-      setAi({ isActive: true, model: 'gpt-4o-mini', temperature: 0.7, systemPrompt: '' });
+      setAi({ isActive: true, model: 'gemini-3.6-flash', temperature: 0.7, systemPrompt: '' });
       setExt({ welcomeMessage: '', handoffKeywords: '' });
     } finally {
       setAiLoading(false);
@@ -541,11 +543,10 @@ export default function WhatsAppSettingsPage() {
                   {/* Model */}
                   <div>
                     <label className="label">โมเดล AI</label>
-                    <input list="wa-models" className="input" value={ai.model} onChange={e => setAi({ ...ai, model: e.target.value })} placeholder="gpt-4o-mini" />
-                    <datalist id="wa-models">
+                    <select className="input" value={ai.model} onChange={e => setAi({ ...ai, model: e.target.value })}>
                       {MODEL_OPTIONS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                    </datalist>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>เลือกจากรายการหรือพิมพ์ชื่อโมเดลเอง (ต้องเป็นโมเดลที่ COMETAPI รองรับ)</div>
+                    </select>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>เลือกโมเดล AI จากรายการที่ COMETAPI รองรับ</div>
                   </div>
 
                   {/* Temperature */}
@@ -608,7 +609,7 @@ export default function WhatsAppSettingsPage() {
                   </div>
                   <div style={{ marginTop: 14, padding: '12px 16px', background: 'rgba(0,212,170,0.08)', border: '1px solid rgba(0,212,170,0.25)', borderRadius: 10 }}>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                      💡 การตั้งค่า AI นี้แยกตามบริษัท <b>{selectedCompany?.name}</b> — จัดการฐานความรู้ (FAQ) เพิ่มเติมได้ที่เมนู <b>🤖 AI Bot</b>
+                      💡 การตั้งค่า AI นี้แยกตามบริษัท <b>{selectedCompany?.name}</b> — จัดการฐานความรู้ (FAQ) เพิ่มเติมได้ที่เมนู <b>🤖 AI LINE BOT</b>
                     </div>
                   </div>
                 </div>

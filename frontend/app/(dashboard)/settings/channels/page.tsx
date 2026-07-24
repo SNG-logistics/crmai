@@ -152,7 +152,7 @@ export default function ChannelsPage() {
           {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', flex: 1, minWidth: 220 }}>
-          เลือกบริษัทเพื่อใส่ LINE OA / Telegram แยกของบริษัทนั้น — แชทที่เข้ามาทาง Webhook ของบริษัทจะเข้า inbox ภายใต้บริษัทนั้น และใช้ AI Bot ของบริษัทนั้นตอบ
+          เลือกบริษัทเพื่อใส่ LINE OA / Telegram แยกของบริษัทนั้น — แชทที่เข้ามาทาง Webhook ของบริษัทจะเข้า inbox ภายใต้บริษัทนั้น และใช้ AI LINE BOT ของบริษัทนั้นตอบ
         </div>
       </div>
       {companyId && isConnected('line') && isFallback('line') && (

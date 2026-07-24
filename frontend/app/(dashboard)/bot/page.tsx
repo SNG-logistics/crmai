@@ -7,7 +7,7 @@ export default function BotPage() {
   const [bot, setBot] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ systemPrompt: '', model: 'gpt-4o', temperature: 0.7, isActive: true });
+  const [form, setForm] = useState({ systemPrompt: '', model: 'gemini-3.6-flash', temperature: 0.7, isActive: true });
   const [kb, setKb] = useState<any[]>([]);
   const [newKb, setNewKb] = useState({ question: '', answer: '', category: 'general' });
   const [testMsg, setTestMsg] = useState('');
@@ -17,7 +17,7 @@ export default function BotPage() {
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
   const [companyId, setCompanyId] = useState<string>('');
 
-  const DEFAULT_FORM = { systemPrompt: '', model: 'gpt-4o', temperature: 0.7, isActive: true };
+  const DEFAULT_FORM = { systemPrompt: '', model: 'gemini-3.6-flash', temperature: 0.7, isActive: true };
   const DEFAULT_SETTINGS = {
     botName: '', greeting: '', language: 'auto', tone: 'friendly',
     maxSentences: 3, useEmoji: true, handoffKeywords: '',
@@ -99,7 +99,7 @@ export default function BotPage() {
     } finally { setTesting(false); }
   };
 
-  const MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'claude-sonnet-4-6', 'claude-opus-4-7', 'gemini-3-5-flash'];
+  const MODELS = ['gemini-3.6-flash', 'gemini-3-5-flash', 'gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'claude-sonnet-4-6', 'claude-opus-4-7'];
 
   return (
     <div>
@@ -124,7 +124,7 @@ export default function BotPage() {
         {/* Bot Settings */}
         <div style={{ background: 'var(--bg-secondary)', borderRadius: 'var(--radius)', border: '1px solid var(--border)', padding: 24, marginBottom: 20 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>🤖 ตั้งค่า AI Bot {companyName ? `— ${companyName}` : ''}</h3>
+            <h3 style={{ fontSize: '1rem', fontWeight: 600 }}>🤖 ตั้งค่า AI LINE BOT {companyName ? `— ${companyName}` : ''}</h3>
             <label className="toggle">
               <input type="checkbox" checked={form.isActive} onChange={e => setForm(f => ({ ...f, isActive: e.target.checked }))} />
               <span className="toggle-slider" />
