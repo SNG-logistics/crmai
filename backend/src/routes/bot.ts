@@ -1,9 +1,38 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import { randomUUID } from 'crypto';
 import prisma from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
-import { generateAIResponse, parseBotSettings, processBotMessage } from '../services/ai.service';
+import { analyzeKnowledgeImage, generateAIResponse, parseBotSettings, processBotMessage } from '../services/ai.service';
 const router = Router();
 router.use(verifyToken);
+
+const VISUAL_KNOWLEDGE_DIR = path.resolve(process.cwd(), 'uploads', 'knowledge');
+const visualKnowledgeUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('รองรับเฉพาะรูป JPG, PNG และ WEBP'));
+  },
+});
+
+function acceptVisualKnowledgeUpload(req: Request, res: Response, next: NextFunction): void {
+  visualKnowledgeUpload.single('image')(req, res, (error: any) => {
+    if (!error) return next();
+    const message = error?.code === 'LIMIT_FILE_SIZE'
+      ? 'รูปต้องมีขนาดไม่เกิน 10 MB'
+      : (error?.message || 'อัปโหลดรูปไม่สำเร็จ');
+    res.status(400).json({ success: false, message });
+  });
+}
+
+function cleanText(value: unknown, maxLength: number): string {
+  return (typeof value === 'string' ? value : '').trim().slice(0, maxLength);
+}
 
 // เลือกบริษัทที่จะจัดการ config: ?companyId= หรือ body.companyId ; ไม่ระบุ → บริษัทเริ่มต้นของ tenant
 // (สร้างบริษัทเริ่มต้นให้อัตโนมัติถ้ายังไม่มี — กัน tenant เก่าที่ยังไม่ backfill)
@@ -23,6 +52,30 @@ async function resolveCompanyId(req: Request): Promise<string> {
     });
   }
   return def.id;
+}
+
+async function ensureBotConfig(tenantId: string, companyId: string) {
+  const existing = await prisma.botConfig.findFirst({ where: { companyId } });
+  if (existing) return existing;
+  try {
+    return await prisma.botConfig.create({
+      data: {
+        tenantId,
+        companyId,
+        name: 'AI LINE BOT',
+        systemPrompt: '',
+        model: 'gemini-3.6-flash',
+        temperature: 0.7,
+        isActive: true,
+        metadata: '{}',
+      },
+    });
+  } catch {
+    // ป้องกันคำขอพร้อมกันสร้าง config ซ้ำจาก unique(companyId)
+    const createdByOtherRequest = await prisma.botConfig.findFirst({ where: { companyId } });
+    if (createdByOtherRequest) return createdByOtherRequest;
+    throw new Error('สร้างการตั้งค่า AI ไม่สำเร็จ');
+  }
 }
 
 router.get('/', async (req: Request, res: Response) => {
@@ -59,33 +112,164 @@ router.get('/knowledge', async (req: Request, res: Response) => {
   try {
     const companyId = await resolveCompanyId(req);
     const bot = await prisma.botConfig.findFirst({ where: { companyId } });
-    if (!bot) return res.json({ success: true, items: [] });
-    const items = await prisma.knowledgeBase.findMany({ where: { botConfigId: bot.id }, orderBy: { createdAt: 'desc' } });
-    return res.json({ success: true, items });
+    if (!bot) return res.json({ success: true, items: [], total: 0, hasMore: false });
+    const sourceType = req.query.sourceType === 'visual' ? 'visual'
+      : req.query.sourceType === 'qa' ? 'qa' : undefined;
+    const where = { botConfigId: bot.id, ...(sourceType ? { sourceType } : {}) };
+    const wantsPagination = req.query.page !== undefined || req.query.limit !== undefined;
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+    const [items, total] = await Promise.all([
+      prisma.knowledgeBase.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        ...(wantsPagination ? { skip: (page - 1) * limit, take: limit } : {}),
+      }),
+      prisma.knowledgeBase.count({ where }),
+    ]);
+    return res.json({
+      success: true,
+      items,
+      total,
+      page: wantsPagination ? page : 1,
+      hasMore: wantsPagination ? page * limit < total : false,
+    });
   } catch { return res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' }); }
 });
 
 router.post('/knowledge', async (req: Request, res: Response) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const bot = await prisma.botConfig.findFirst({ where: { companyId } });
-    if (!bot) return res.status(404).json({ success: false, message: 'ยังไม่มี Bot Config' });
-    const { companyId: _c, ...kb } = req.body || {};
-    const item = await prisma.knowledgeBase.create({ data: { botConfigId: bot.id, ...kb } });
+    const bot = await ensureBotConfig(req.tenantId!, companyId);
+    const question = cleanText(req.body?.question, 1000);
+    const answer = cleanText(req.body?.answer, 20000);
+    const category = cleanText(req.body?.category, 100) || 'general';
+    if (!question || !answer) {
+      return res.status(400).json({ success: false, message: 'กรุณากรอกคำถามและคำตอบ' });
+    }
+    const item = await prisma.knowledgeBase.create({
+      data: { botConfigId: bot.id, question, answer, category, sourceType: 'qa', isActive: true },
+    });
     return res.status(201).json({ success: true, item });
-  } catch { return res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' }); }
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error?.message || 'เกิดข้อผิดพลาด' });
+  }
+});
+
+// POST /api/bot/knowledge/visual — เพิ่มความรู้จากรูป + ข้อความ (เพิ่มได้ไม่จำกัดจำนวน)
+router.post('/knowledge/visual', acceptVisualKnowledgeUpload, async (req: Request, res: Response) => {
+  let savedImagePath = '';
+  try {
+    const companyId = await resolveCompanyId(req);
+    const bot = await ensureBotConfig(req.tenantId!, companyId);
+    const sourceText = cleanText(req.body?.sourceText, 12000);
+    const category = cleanText(req.body?.category, 100) || 'visual';
+    if (!req.file && !sourceText) {
+      return res.status(400).json({ success: false, message: 'กรุณาแนบรูปหรือใส่ข้อความความรู้' });
+    }
+
+    const analysis = req.file
+      ? await analyzeKnowledgeImage({
+          imageBase64: `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`,
+          sourceText,
+          model: bot.model,
+        })
+      : {
+          title: sourceText.split(/\r?\n/)[0].slice(0, 300) || 'ความรู้จากผู้ดูแล',
+          extractedText: '',
+          summary: sourceText,
+          searchTerms: [] as string[],
+        };
+
+    let imageUrl: string | null = null;
+    if (req.file) {
+      const extensionByMime: Record<string, string> = {
+        'image/jpeg': '.jpg',
+        'image/png': '.png',
+        'image/webp': '.webp',
+      };
+      const tenantDirectory = path.join(VISUAL_KNOWLEDGE_DIR, req.tenantId!);
+      await fs.promises.mkdir(tenantDirectory, { recursive: true });
+      const filename = `${Date.now()}-${randomUUID()}${extensionByMime[req.file.mimetype] || '.jpg'}`;
+      savedImagePath = path.join(tenantDirectory, filename);
+      await fs.promises.writeFile(savedImagePath, req.file.buffer);
+      imageUrl = `/uploads/knowledge/${req.tenantId!}/${filename}`;
+    }
+
+    const analysisParts = [
+      analysis.extractedText ? `ข้อความที่อ่านได้จากรูป:\n${analysis.extractedText}` : '',
+      analysis.summary ? `สรุปข้อเท็จจริง:\n${analysis.summary}` : '',
+      analysis.searchTerms.length ? `คำค้น:\n${analysis.searchTerms.join(', ')}` : '',
+    ].filter(Boolean);
+    const imageAnalysis = analysisParts.join('\n\n');
+    const answer = [
+      sourceText ? `ข้อความที่ผู้ดูแลกำหนด:\n${sourceText}` : '',
+      imageAnalysis,
+    ].filter(Boolean).join('\n\n').slice(0, 30000);
+
+    const item = await prisma.knowledgeBase.create({
+      data: {
+        botConfigId: bot.id,
+        question: analysis.title,
+        answer,
+        category,
+        sourceType: 'visual',
+        sourceText: sourceText || null,
+        imageUrl,
+        imageAnalysis: imageAnalysis || null,
+        isActive: true,
+      },
+    });
+    return res.status(201).json({ success: true, item });
+  } catch (error: any) {
+    if (savedImagePath) {
+      await fs.promises.unlink(savedImagePath).catch(() => undefined);
+    }
+    console.error('[Visual Knowledge] create failed:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'วิเคราะห์และบันทึกความรู้จากรูปไม่สำเร็จ',
+    });
+  }
 });
 
 router.put('/knowledge/:id', async (req: Request, res: Response) => {
   try {
-    const item = await prisma.knowledgeBase.update({ where: { id: req.params.id }, data: req.body });
+    const companyId = await resolveCompanyId(req);
+    const bot = await prisma.botConfig.findFirst({ where: { companyId }, select: { id: true } });
+    if (!bot) return res.status(404).json({ success: false, message: 'ไม่พบการตั้งค่า AI ของบริษัทนี้' });
+    const existing = await prisma.knowledgeBase.findFirst({
+      where: { id: req.params.id, botConfigId: bot.id },
+      select: { id: true },
+    });
+    if (!existing) return res.status(404).json({ success: false, message: 'ไม่พบรายการความรู้ของบริษัทนี้' });
+    const data: { question?: string; answer?: string; category?: string; isActive?: boolean } = {};
+    if (req.body?.question !== undefined) data.question = cleanText(req.body.question, 1000);
+    if (req.body?.answer !== undefined) data.answer = cleanText(req.body.answer, 30000);
+    if (req.body?.category !== undefined) data.category = cleanText(req.body.category, 100) || 'general';
+    if (typeof req.body?.isActive === 'boolean') data.isActive = req.body.isActive;
+    const item = await prisma.knowledgeBase.update({ where: { id: existing.id }, data });
     return res.json({ success: true, item });
   } catch { return res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' }); }
 });
 
 router.delete('/knowledge/:id', async (req: Request, res: Response) => {
   try {
-    await prisma.knowledgeBase.delete({ where: { id: req.params.id } });
+    const companyId = await resolveCompanyId(req);
+    const bot = await prisma.botConfig.findFirst({ where: { companyId }, select: { id: true } });
+    if (!bot) return res.status(404).json({ success: false, message: 'ไม่พบการตั้งค่า AI ของบริษัทนี้' });
+    const item = await prisma.knowledgeBase.findFirst({
+      where: { id: req.params.id, botConfigId: bot.id },
+      select: { id: true, imageUrl: true },
+    });
+    if (!item) return res.status(404).json({ success: false, message: 'ไม่พบรายการความรู้ของบริษัทนี้' });
+    await prisma.knowledgeBase.delete({ where: { id: item.id } });
+    if (item.imageUrl?.startsWith('/uploads/knowledge/')) {
+      const filePath = path.resolve(process.cwd(), item.imageUrl.replace(/^\/+/, ''));
+      if (filePath.startsWith(VISUAL_KNOWLEDGE_DIR + path.sep)) {
+        await fs.promises.unlink(filePath).catch(() => undefined);
+      }
+    }
     return res.json({ success: true });
   } catch { return res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' }); }
 });

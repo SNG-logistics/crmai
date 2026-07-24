@@ -16,30 +16,30 @@ datasource db {
 // =============================================
 
 model Tenant {
-  id        String  @id @default(cuid())
+  id        String   @id @default(cuid())
   name      String
-  slug      String  @unique // subdomain/identifier
+  slug      String   @unique // subdomain/identifier
   logo      String?
-  plan      String  @default("starter") // starter, pro, enterprise
-  isActive  Boolean @default(true)
-  settings  String  @default("{}")
+  plan      String   @default("starter") // starter, pro, enterprise
+  isActive  Boolean  @default(true)
+  settings  String   @default("{}")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users           User[]
-  contacts        Contact[]
-  conversations   Conversation[]
-  tickets         Ticket[]
-  tags            Tag[]
-  bots            BotConfig[]
-  broadcasts      Broadcast[]
-  automations     AutomationRule[]
-  channels        ChannelConfig[]
-  callLogs        CallLog[]
-  tsTargets       TelesalesTarget[]
-  financials      FinancialRecord[]
-  partners        Partner[]
-  smsLogs         SmsLog[]
+  users             User[]
+  contacts          Contact[]
+  conversations     Conversation[]
+  tickets           Ticket[]
+  tags              Tag[]
+  bots              BotConfig[]
+  broadcasts        Broadcast[]
+  automations       AutomationRule[]
+  channels          ChannelConfig[]
+  callLogs          CallLog[]
+  tsTargets         TelesalesTarget[]
+  financials        FinancialRecord[]
+  partners          Partner[]
+  smsLogs           SmsLog[]
   flexTemplates     FlexTemplate[]
   auditLogs         AuditLog[]
   slipVerifications SlipVerification[]
@@ -63,7 +63,7 @@ model User {
   tenant           Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   email            String
   username         String
-  passwordHash     String?   // optional — Firebase Auth users (esp. Google sign-in) have no local password
+  passwordHash     String? // optional — Firebase Auth users (esp. Google sign-in) have no local password
   firebaseUid      String?   @unique // links this user to its Firebase Auth account
   displayName      String
   avatar           String?
@@ -114,18 +114,18 @@ model Company {
 
 // WhatsApp accounts (เบอร์) ต่อ Company — รองรับหลายเบอร์ต่อบริษัท
 model WhatsAppAccount {
-  id         String   @id @default(cuid())
-  tenantId   String
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  companyId  String
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  label      String   @default("WhatsApp")     // ชื่อเรียกเบอร์ (แสดงใน UI)
-  phone      String?                            // เบอร์ที่ล็อกอินสำเร็จ
-  sessionId  String?                            // ชื่อโฟลเดอร์ auth บนดิสก์ (default = id ; migrated = tenantId เพื่อรีใช้ session เดิม)
-  status     String   @default("disconnected") // qr | connecting | connected | disconnected
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  label     String   @default("WhatsApp") // ชื่อเรียกเบอร์ (แสดงใน UI)
+  phone     String? // เบอร์ที่ล็อกอินสำเร็จ
+  sessionId String? // ชื่อโฟลเดอร์ auth บนดิสก์ (default = id ; migrated = tenantId เพื่อรีใช้ session เดิม)
+  status    String   @default("disconnected") // qr | connecting | connected | disconnected
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   conversations Conversation[]
 
@@ -136,9 +136,9 @@ model WhatsAppAccount {
 // ไม่มีแถว = เห็นทุกบริษัทใน tenant (owner/superadmin) ; มีแถว = จำกัดเฉพาะบริษัทที่ระบุ
 model UserCompany {
   userId    String
-  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   companyId String
-  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   role      String? // เผื่อ override role ราย company ในอนาคต
   createdAt DateTime @default(now())
 
@@ -154,11 +154,11 @@ model ChannelConfig {
   id        String   @id @default(cuid())
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  companyId String?  // บริษัทเจ้าของช่องทางนี้ (null = ช่องทางกลางของ tenant)
+  companyId String? // บริษัทเจ้าของช่องทางนี้ (null = ช่องทางกลางของ tenant)
   company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  channel   String   // line, telegram, webchat
+  channel   String // line, telegram, webchat
   isActive  Boolean  @default(true)
-  config    String   // channel-specific config (tokens, secrets etc)
+  config    String // channel-specific config (tokens, secrets etc)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -171,47 +171,47 @@ model ChannelConfig {
 // =============================================
 
 model Contact {
-  id            String   @id @default(cuid())
-  tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  displayName   String
-  firstName     String?
-  lastName      String?
-  email         String?
-  phone         String?
-  avatar        String?
-  lineUserId    String?
-  telegramId    String?
-  whatsappId    String?  // format: "66812345678@s.whatsapp.net"
-  webchatId     String?
-  tags          ContactTag[]
-  customFields  String   @default("{}")
-  leadScore     Int      @default(0)
-  isBlocked     Boolean  @default(false)
-  notes         String?
+  id           String       @id @default(cuid())
+  tenantId     String
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  displayName  String
+  firstName    String?
+  lastName     String?
+  email        String?
+  phone        String?
+  avatar       String?
+  lineUserId   String?
+  telegramId   String?
+  whatsappId   String? // format: "66812345678@s.whatsapp.net"
+  webchatId    String?
+  tags         ContactTag[]
+  customFields String       @default("{}")
+  leadScore    Int          @default(0)
+  isBlocked    Boolean      @default(false)
+  notes        String?
 
   // ─── Telesales / Gaming fields ───────────────
-  username        String?  // ยูเซอร์เนมในระบบเกม
-  affiliateCode   String?  // รหัสพาร์ทเนอร์
-  memberType      String   @default("new") // new, regular, vip, churned
-  tsStatus        String   @default("pending") // pending, calling, answered, no_answer, done
-  tsAssignedToId  String?  // agent ที่รับผิดชอบ Telesales
-  registeredAt    DateTime?
-  firstDepositAt  DateTime?
-  lastDepositAt   DateTime?
-  totalDeposit    Float    @default(0)
-  totalWithdraw   Float    @default(0)
-  totalProfit     Float    @default(0)
-  depositCount    Int      @default(0)
-  withdrawCount   Int      @default(0)
+  username       String? // ยูเซอร์เนมในระบบเกม
+  affiliateCode  String? // รหัสพาร์ทเนอร์
+  memberType     String    @default("new") // new, regular, vip, churned
+  tsStatus       String    @default("pending") // pending, calling, answered, no_answer, done
+  tsAssignedToId String? // agent ที่รับผิดชอบ Telesales
+  registeredAt   DateTime?
+  firstDepositAt DateTime?
+  lastDepositAt  DateTime?
+  totalDeposit   Float     @default(0)
+  totalWithdraw  Float     @default(0)
+  totalProfit    Float     @default(0)
+  depositCount   Int       @default(0)
+  withdrawCount  Int       @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  conversations  Conversation[]
-  tickets        Ticket[]
-  callLogs       CallLog[]
-  financials     FinancialRecord[]
+  conversations Conversation[]
+  tickets       Ticket[]
+  callLogs      CallLog[]
+  financials    FinancialRecord[]
 
   @@unique([tenantId, lineUserId])
   @@unique([tenantId, telegramId])
@@ -222,26 +222,26 @@ model Contact {
 // =============================================
 
 model Conversation {
-  id            String    @id @default(cuid())
-  tenantId      String
-  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  companyId         String?          // บริษัทที่บทสนทนานี้สังกัด (null = ยังไม่ backfill / default company)
+  id                String           @id @default(cuid())
+  tenantId          String
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId         String? // บริษัทที่บทสนทนานี้สังกัด (null = ยังไม่ backfill / default company)
   company           Company?         @relation(fields: [companyId], references: [id])
-  whatsAppAccountId String?          // เบอร์ WhatsApp ที่รับข้อความนี้ (เฉพาะ channel=whatsapp)
+  whatsAppAccountId String? // เบอร์ WhatsApp ที่รับข้อความนี้ (เฉพาะ channel=whatsapp)
   whatsAppAccount   WhatsAppAccount? @relation(fields: [whatsAppAccountId], references: [id])
-  contactId     String
-  contact       Contact   @relation(fields: [contactId], references: [id])
-  channel       String    // line, telegram, webchat
-  channelId     String    // platform-specific conversation/user ID
-  status        String    @default("open") // open, bot, pending, resolved, closed
-  assignedToId  String?
-  assignedTo    User?     @relation("AssignedAgent", fields: [assignedToId], references: [id])
-  isBot         Boolean   @default(true)
-  priority      String    @default("normal") // low, normal, high, urgent
-  lastMessageAt DateTime?
-  resolvedAt    DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  contactId         String
+  contact           Contact          @relation(fields: [contactId], references: [id])
+  channel           String // line, telegram, webchat
+  channelId         String // platform-specific conversation/user ID
+  status            String           @default("open") // open, bot, pending, resolved, closed
+  assignedToId      String?
+  assignedTo        User?            @relation("AssignedAgent", fields: [assignedToId], references: [id])
+  isBot             Boolean          @default(true)
+  priority          String           @default("normal") // low, normal, high, urgent
+  lastMessageAt     DateTime?
+  resolvedAt        DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
   messages Message[]
   ticket   Ticket?
@@ -262,7 +262,7 @@ model Message {
   tenantId       String
   senderId       String?
   sender         User?        @relation(fields: [senderId], references: [id])
-  senderType     String       // customer, agent, bot
+  senderType     String // customer, agent, bot
   type           String       @default("text")
   content        String
   metadata       String       @default("{}")
@@ -300,11 +300,11 @@ model Ticket {
 // =============================================
 
 model Tag {
-  id       String     @id @default(cuid())
+  id       String       @id @default(cuid())
   tenantId String
-  tenant   Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name     String
-  color    String     @default("#00D4AA")
+  color    String       @default("#00D4AA")
   contacts ContactTag[]
 
   @@unique([tenantId, name])
@@ -327,7 +327,7 @@ model BotConfig {
   id            String          @id @default(cuid())
   tenantId      String
   tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  companyId     String?         // บริษัทเจ้าของ config นี้ (null = config ระดับ tenant เดิม)
+  companyId     String? // บริษัทเจ้าของ config นี้ (null = config ระดับ tenant เดิม)
   company       Company?        @relation(fields: [companyId], references: [id], onDelete: Cascade)
   name          String
   isActive      Boolean         @default(true)
@@ -349,15 +349,21 @@ model BotConfig {
 // =============================================
 
 model KnowledgeBase {
-  id          String    @id @default(cuid())
-  botConfigId String
-  botConfig   BotConfig @relation(fields: [botConfigId], references: [id], onDelete: Cascade)
-  question    String
-  answer      String
-  category    String    @default("general")
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id            String    @id @default(cuid())
+  botConfigId   String
+  botConfig     BotConfig @relation(fields: [botConfigId], references: [id], onDelete: Cascade)
+  question      String
+  answer        String
+  category      String    @default("general")
+  sourceType    String    @default("qa") // qa | visual
+  sourceText    String? // ข้อความที่ผู้ดูแลกำกับรูป
+  imageUrl      String? // รูปต้นฉบับใน /uploads/knowledge
+  imageAnalysis String? // OCR/ข้อเท็จจริง/คำค้นที่ AI อ่านจากรูป
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([botConfigId])
 }
 
 // =============================================
@@ -368,11 +374,11 @@ model QuickReply {
   id        String   @id @default(cuid())
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  trigger   String   // เช่น "/deposit" — พิมพ์ในช่องแชทเพื่อเรียก
-  title     String   // ชื่อเรียกสั้นๆ เช่น "วิธีฝากเงิน"
-  content   String   // เนื้อหา/ข้อมูลดิบที่ AI ใช้แต่งคำตอบ
+  trigger   String // เช่น "/deposit" — พิมพ์ในช่องแชทเพื่อเรียก
+  title     String // ชื่อเรียกสั้นๆ เช่น "วิธีฝากเงิน"
+  content   String // เนื้อหา/ข้อมูลดิบที่ AI ใช้แต่งคำตอบ
   category  String   @default("ทั่วไป")
-  aiCompose Boolean  @default(true)  // true = AI แต่งคำใหม่ตามบริบท, false = แทรกข้อความตรงๆ
+  aiCompose Boolean  @default(true) // true = AI แต่งคำใหม่ตามบริบท, false = แทรกข้อความตรงๆ
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -426,20 +432,20 @@ model AutomationRule {
 // =============================================
 
 model CallLog {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   tenantId       String
-  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   contactId      String
-  contact        Contact  @relation(fields: [contactId], references: [id])
+  contact        Contact   @relation(fields: [contactId], references: [id])
   agentId        String
-  agent          User     @relation("AgentCallLogs", fields: [agentId], references: [id])
-  status         String   // answered | no_answer | busy | callback | done
-  duration       Int?     // วินาที
+  agent          User      @relation("AgentCallLogs", fields: [agentId], references: [id])
+  status         String // answered | no_answer | busy | callback | done
+  duration       Int? // วินาที
   notes          String?
-  depositedAfter Boolean  @default(false)
+  depositedAfter Boolean   @default(false)
   depositAmount  Float?
   scheduledAt    DateTime?
-  calledAt       DateTime @default(now())
+  calledAt       DateTime  @default(now())
 }
 
 // =============================================
@@ -447,17 +453,17 @@ model CallLog {
 // =============================================
 
 model TelesalesTarget {
-  id                  String   @id @default(cuid())
+  id                  String @id @default(cuid())
   tenantId            String
-  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant              Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   agentId             String
-  agent               User     @relation(fields: [agentId], references: [id])
-  period              String   // "2026-05"
-  callTarget          Int      @default(100)
-  answerRateTarget    Float    @default(0.6)
-  depositRateTarget   Float    @default(0.3)
-  depositAmountTarget Float    @default(50000)
-  profitTarget        Float    @default(20000)
+  agent               User   @relation(fields: [agentId], references: [id])
+  period              String // "2026-05"
+  callTarget          Int    @default(100)
+  answerRateTarget    Float  @default(0.6)
+  depositRateTarget   Float  @default(0.3)
+  depositAmountTarget Float  @default(50000)
+  profitTarget        Float  @default(20000)
 
   @@unique([tenantId, agentId, period])
 }
@@ -472,7 +478,7 @@ model FinancialRecord {
   tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   contactId      String
   contact        Contact  @relation(fields: [contactId], references: [id])
-  date           String   // "2026-05-25"
+  date           String // "2026-05-25"
   depositAmount  Float    @default(0)
   withdrawAmount Float    @default(0)
   netProfit      Float    @default(0)
@@ -490,15 +496,15 @@ model FinancialRecord {
 // =============================================
 
 model Partner {
-  id        String    @id @default(cuid())
-  tenantId  String
-  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  code      String
-  name      String
-  phone     String?
-  commission Float   @default(0)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
+  id         String   @id @default(cuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  code       String
+  name       String
+  phone      String?
+  commission Float    @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
 
   @@unique([tenantId, code])
 }
@@ -508,21 +514,21 @@ model Partner {
 // =============================================
 
 model SmsLog {
-  id          String   @id @default(cuid())
-  tenantId    String
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  phone       String   // เบอร์ผู้รับ
-  message     String   // ข้อความที่ส่ง
-  sender      String   @default("CRM") // ชื่อผู้ส่ง (Sender Name)
-  status      String   @default("pending") // pending, sent, delivered, failed
-  provider    String   @default("thsms") // thsms, twilio, mock
+  id            String   @id @default(cuid())
+  tenantId      String
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  phone         String // เบอร์ผู้รับ
+  message       String // ข้อความที่ส่ง
+  sender        String   @default("CRM") // ชื่อผู้ส่ง (Sender Name)
+  status        String   @default("pending") // pending, sent, delivered, failed
+  provider      String   @default("thsms") // thsms, twilio, mock
   providerMsgId String? // Message ID จาก provider
-  creditUsed  Float    @default(1) // จำนวน credit ที่ใช้
-  errorMsg    String?  // error message ถ้าส่งไม่ได้
-  contactId   String?  // ถ้าเชื่อมกับ contact
-  broadcastId String?  // ถ้าส่งจาก broadcast
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  creditUsed    Float    @default(1) // จำนวน credit ที่ใช้
+  errorMsg      String? // error message ถ้าส่งไม่ได้
+  contactId     String? // ถ้าเชื่อมกับ contact
+  broadcastId   String? // ถ้าส่งจาก broadcast
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 // =============================================
@@ -530,21 +536,21 @@ model SmsLog {
 // =============================================
 
 model SyncLog {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   tenantId    String
-  type        String   // members | deposits | transactions | csv_members | csv_transactions
-  status      String   // running | done | error
-  source      String   @default("api") // api | csv | webhook
-  totalRows   Int      @default(0)
-  inserted    Int      @default(0)
-  updated     Int      @default(0)
-  skipped     Int      @default(0)
-  errors      Int      @default(0)
-  errorDetail String?  // JSON array of error messages
-  filename    String?  // ชื่อไฟล์ CSV
-  startedAt   DateTime @default(now())
+  type        String // members | deposits | transactions | csv_members | csv_transactions
+  status      String // running | done | error
+  source      String    @default("api") // api | csv | webhook
+  totalRows   Int       @default(0)
+  inserted    Int       @default(0)
+  updated     Int       @default(0)
+  skipped     Int       @default(0)
+  errors      Int       @default(0)
+  errorDetail String? // JSON array of error messages
+  filename    String? // ชื่อไฟล์ CSV
+  startedAt   DateTime  @default(now())
   finishedAt  DateTime?
-  duration    Int?     // milliseconds
+  duration    Int? // milliseconds
 }
 
 // =============================================
@@ -555,10 +561,10 @@ model FlexTemplate {
   id        String   @id @default(cuid())
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name      String   // ชื่อ template
+  name      String // ชื่อ template
   category  String   @default("custom") // welcome, promotion, vip, birthday, winback, custom
   altText   String   @default("") // ข้อความสำรอง (กรณีไม่รองรับ FLEX)
-  flexJson  String   // JSON string ของ flex contents
+  flexJson  String // JSON string ของ flex contents
   isActive  Boolean  @default(true)
   usedCount Int      @default(0) // ใช้กี่ครั้ง
   createdAt DateTime @default(now())
@@ -574,8 +580,8 @@ model AuditLog {
   tenantId  String
   tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   userId    String?
-  action    String   // e.g. "USER_LOGIN", "CONTACT_EXPORT", "TICKET_DELETE", "BOT_UPDATE"
-  details   String   // JSON string of details
+  action    String // e.g. "USER_LOGIN", "CONTACT_EXPORT", "TICKET_DELETE", "BOT_UPDATE"
+  details   String // JSON string of details
   ipAddress String?
   userAgent String?
   createdAt DateTime @default(now())
@@ -586,46 +592,46 @@ model AuditLog {
 // =============================================
 
 model SlipVerification {
-  id              String   @id @default(cuid())
-  tenantId        String
-  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  conversationId  String
-  contactId       String
-  messageId       String   // message ที่ส่งรูปมา
+  id             String @id @default(cuid())
+  tenantId       String
+  tenant         Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversationId String
+  contactId      String
+  messageId      String // message ที่ส่งรูปมา
 
   // ─── Image Info ───
-  imageHash       String   // SHA-256 hash ของรูป (เช็คสลิปซ้ำ)
-  imagePath       String   // path ที่เก็บรูป
+  imageHash String // SHA-256 hash ของรูป (เช็คสลิปซ้ำ)
+  imagePath String // path ที่เก็บรูป
 
   // ─── SlipOK Result ───
-  slipokSuccess   Boolean?
-  transRef        String?  // transaction reference
-  sendingBank     String?
-  receivingBank   String?
-  amount          Float?
-  transDate       String?
-  transTime       String?
-  senderName      String?
-  receiverName    String?
+  slipokSuccess Boolean?
+  transRef      String? // transaction reference
+  sendingBank   String?
+  receivingBank String?
+  amount        Float?
+  transDate     String?
+  transTime     String?
+  senderName    String?
+  receiverName  String?
 
   // ─── AI Vision Result ───
-  aiSuccess       Boolean?
-  aiAmount        Float?
-  aiBankFrom      String?
-  aiBankTo        String?
-  aiTransDate     String?
-  aiConfidence    String?  // high, medium, low
-  aiSuspicious    Boolean  @default(false)
-  aiReason        String?
+  aiSuccess    Boolean?
+  aiAmount     Float?
+  aiBankFrom   String?
+  aiBankTo     String?
+  aiTransDate  String?
+  aiConfidence String? // high, medium, low
+  aiSuspicious Boolean  @default(false)
+  aiReason     String?
 
   // ─── Final Verdict ───
-  status          String   @default("pending") // pending, verified, fake, duplicate, error
-  verifiedBy      String   @default("auto")    // auto, slipok, ai, manual
-  isDuplicate     Boolean  @default(false)
-  duplicateOfId   String?
+  status        String  @default("pending") // pending, verified, fake, duplicate, error
+  verifiedBy    String  @default("auto") // auto, slipok, ai, manual
+  isDuplicate   Boolean @default(false)
+  duplicateOfId String?
 
-  notes           String?
-  createdAt       DateTime @default(now())
+  notes     String?
+  createdAt DateTime @default(now())
 
   @@index([tenantId])
   @@index([imageHash])
@@ -638,46 +644,46 @@ model SlipVerification {
 
 // การตั้งค่าระบบ BONUSTIME ต่อบริษัท (1 company = 1 config)
 model BonusTimeConfig {
-  id            String   @id @default(cuid())
-  tenantId      String
-  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  companyId     String?  @unique // per-company config (เหมือน BotConfig)
+  id        String  @id @default(cuid())
+  tenantId  String
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId String? @unique // per-company config (เหมือน BotConfig)
 
-  isActive      Boolean  @default(true)
-  headerTitle   String   @default("⚡ BONUS TIME ⚡")
+  isActive       Boolean @default(true)
+  headerTitle    String  @default("⚡ BONUS TIME ⚡")
   headerSubtitle String  @default("AI WINRATE SYSTEM • LIVE อัปเดต Real-Time")
-  intro         String   @default("เลือกค่ายเกมที่ต้องการดูอัตราชนะแบบเรียลไทม์ได้เลยค่ะ 👇")
-  gamesIntro    String   @default("อัตราชนะล่าสุดของค่ายนี้ค่ะ กดปุ่มด้านล่างเพื่อดูค่ายอื่นได้นะคะ ✨")
-  footerNote    String   @default("* อัตราอ้างอิงจากสถิติระบบ ไม่ใช่การรับประกันผล")
+  intro          String  @default("เลือกค่ายเกมที่ต้องการดูอัตราชนะแบบเรียลไทม์ได้เลยค่ะ 👇")
+  gamesIntro     String  @default("อัตราชนะล่าสุดของค่ายนี้ค่ะ กดปุ่มด้านล่างเพื่อดูค่ายอื่นได้นะคะ ✨")
+  footerNote     String  @default("* อัตราอ้างอิงจากสถิติระบบ ไม่ใช่การรับประกันผล")
 
-  aiTrigger     Boolean  @default(true)  // ให้ AI ตัดสินใจเรียกระบบเอง
-  keywords      String   @default("[]")  // JSON array คีย์เวิร์ดเสริม (fast-path)
-  liveJitter    Int      @default(4)     // ±% สุ่มขยับให้ดู LIVE (0 = ปิด)
-  accent        String   @default("#F59E0B")
+  aiTrigger  Boolean @default(true) // ให้ AI ตัดสินใจเรียกระบบเอง
+  keywords   String  @default("[]") // JSON array คีย์เวิร์ดเสริม (fast-path)
+  liveJitter Int     @default(4) // ±% สุ่มขยับให้ดู LIVE (0 = ปิด)
+  accent     String  @default("#F59E0B")
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([tenantId])
 }
 
 // ค่ายเกม (PG SOFT, JILI, PRAGMATIC ...)
 model BonusTimeCamp {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   tenantId  String
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   companyId String?
 
-  name      String            // ชื่อค่าย เช่น "JILI"
-  code      String            // slug เช่น "jili"
-  logo      String?           // URL รูปโลโก้ค่าย
-  accent    String   @default("#00D4AA")
-  order     Int      @default(0)
-  isActive  Boolean  @default(true)
+  name     String // ชื่อค่าย เช่น "JILI"
+  code     String // slug เช่น "jili"
+  logo     String? // URL รูปโลโก้ค่าย
+  accent   String  @default("#00D4AA")
+  order    Int     @default(0)
+  isActive Boolean @default(true)
 
   games     BonusTimeGame[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 
   @@index([tenantId])
   @@index([companyId])
@@ -685,27 +691,27 @@ model BonusTimeCamp {
 
 // เกมในค่าย พร้อมค่า % (อัตราชนะ / ฟรีสปิน / WILD)
 model BonusTimeGame {
-  id           String   @id @default(cuid())
-  tenantId     String
-  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  companyId    String?
-  campId       String
-  camp         BonusTimeCamp @relation(fields: [campId], references: [id], onDelete: Cascade)
+  id        String        @id @default(cuid())
+  tenantId  String
+  tenant    Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId String?
+  campId    String
+  camp      BonusTimeCamp @relation(fields: [campId], references: [id], onDelete: Cascade)
 
   name         String
-  image        String?                 // URL ไอคอนเกม (แสดงข้างชื่อ)
-  banner       String?                 // URL รูปกราฟิกใหญ่ด้านบน (แอดมินอัปเอง)
-  winRate      Int      @default(85)   // อัตราชนะ %
-  freeSpinRate Int      @default(70)   // โอกาสเข้าฟรีสปิน %
-  wildRate     Int      @default(75)   // WILD %
-  provider     String   @default("")   // ป้ายค่าย/ผู้พัฒนา (แสดงในการ์ด)
-  languages    String   @default("[\"TH\"]") // JSON เช่น ["TH","EN"]
-  link         String?                 // ลิงก์เข้าเล่น (ถ้ามี)
-  order        Int      @default(0)
-  isActive     Boolean  @default(true)
+  image        String? // URL ไอคอนเกม (แสดงข้างชื่อ)
+  banner       String? // URL รูปกราฟิกใหญ่ด้านบน (แอดมินอัปเอง)
+  winRate      Int     @default(85) // อัตราชนะ %
+  freeSpinRate Int     @default(70) // โอกาสเข้าฟรีสปิน %
+  wildRate     Int     @default(75) // WILD %
+  provider     String  @default("") // ป้ายค่าย/ผู้พัฒนา (แสดงในการ์ด)
+  languages    String  @default("[\"TH\"]") // JSON เช่น ["TH","EN"]
+  link         String? // ลิงก์เข้าเล่น (ถ้ามี)
+  order        Int     @default(0)
+  isActive     Boolean @default(true)
 
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([tenantId])
   @@index([campId])
@@ -733,25 +739,25 @@ model SlotProvider {
 }
 
 model SlotGame {
-  id              String        @id @default(cuid())
+  id              String       @id @default(cuid())
   tenantId        String
   providerId      String
-  provider        SlotProvider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  provider        SlotProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
   code            String
   name            String
   slug            String
   imageUrl        String?
   description     String?
   playUrl         String?
-  tags            String        @default("[]")
-  isRecommended   Boolean       @default(false)
-  isActive        Boolean       @default(true)
-  popularityScore Int           @default(0)
-  bonusScore      Int           @default(0)
-  featureScore    Int           @default(0)
+  tags            String       @default("[]")
+  isRecommended   Boolean      @default(false)
+  isActive        Boolean      @default(true)
+  popularityScore Int          @default(0)
+  bonusScore      Int          @default(0)
+  featureScore    Int          @default(0)
   events          SlotEvent[]
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   @@unique([tenantId, slug])
   @@index([tenantId])

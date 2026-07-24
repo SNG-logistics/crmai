@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
 import { useSocket } from '../../../../lib/socket';
+import VisualKnowledgeManager from '../../../../components/VisualKnowledgeManager';
 
 type WaStatus = 'disconnected' | 'connecting' | 'qr' | 'connected';
 type Tab = 'connect' | 'ai';
@@ -627,9 +628,13 @@ export default function WhatsAppSettingsPage() {
                   </div>
                   <div style={{ marginTop: 14, padding: '12px 16px', background: 'rgba(0,212,170,0.08)', border: '1px solid rgba(0,212,170,0.25)', borderRadius: 10 }}>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                      💡 การตั้งค่า AI นี้แยกตามบริษัท <b>{selectedCompany?.name}</b> — จัดการฐานความรู้ (FAQ) เพิ่มเติมได้ที่เมนู <b>🤖 AI LINE BOT</b>
+                      💡 การตั้งค่าและฐานความรู้แยกตามบริษัท <b>{selectedCompany?.name}</b> และใช้ตอบเฉพาะลูกค้าของบริษัทนี้
                     </div>
                   </div>
+                </div>
+
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <VisualKnowledgeManager companyId={companyId} companyName={selectedCompany?.name} />
                 </div>
               </div>
             )

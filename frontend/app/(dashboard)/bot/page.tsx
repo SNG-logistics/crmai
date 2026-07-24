@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
+import VisualKnowledgeManager from '../../../components/VisualKnowledgeManager';
 
 export default function BotPage() {
   const [bot, setBot] = useState<any>(null);
@@ -83,7 +84,7 @@ export default function BotPage() {
   };
 
   const deleteKb = async (id: string) => {
-    await api.delete(`/bot/knowledge/${id}`);
+    await api.delete(`/bot/knowledge/${id}`, { params: { companyId } });
     setKb(prev => prev.filter(k => k.id !== id));
   };
 
@@ -100,6 +101,7 @@ export default function BotPage() {
   };
 
   const MODELS = ['gemini-3.6-flash', 'gemini-3-5-flash', 'gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'claude-sonnet-4-6', 'claude-opus-4-7'];
+  const qaItems = kb.filter((item: any) => !item.sourceType || item.sourceType === 'qa');
 
   return (
     <div>
@@ -248,7 +250,7 @@ export default function BotPage() {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {kb.map((item: any) => (
+            {qaItems.map((item: any) => (
               <div key={item.id} style={{ background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-sm)', padding: '10px 14px', display: 'flex', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 500, fontSize: '0.875rem', marginBottom: 4 }}>❓ {item.question}</div>
@@ -258,8 +260,12 @@ export default function BotPage() {
                 <button className="btn btn-danger btn-sm btn-icon" onClick={() => deleteKb(item.id)}>🗑️</button>
               </div>
             ))}
-            {kb.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20 }}>ยังไม่มี Knowledge Base เพิ่ม Q&A เพื่อให้ Bot ตอบได้ดีขึ้น</div>}
+            {qaItems.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20 }}>ยังไม่มี Knowledge Base เพิ่ม Q&A เพื่อให้ Bot ตอบได้ดีขึ้น</div>}
           </div>
+        </div>
+
+        <div style={{ marginTop: 20 }}>
+          <VisualKnowledgeManager companyId={companyId} companyName={companyName} />
         </div>
       </div>
 
