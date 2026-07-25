@@ -241,7 +241,42 @@
 .cannedItem:hover { background: var(--bg-hover); }
 .chatInput { border-top: 1px solid var(--border); background: rgba(13, 17, 34, 0.8); position: relative; }
 
-/* ═══ Right: Contact Panel ═══════════════════════════════════════════════════ */
+/* ═══ Right: AI Smart Panel ═════════════════════════════════════════════════ */
+.aiPanel {
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+  background: rgba(13, 17, 34, 0.7);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 280px;
+  flex-shrink: 0;
+}
+.aiPanelClose {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1rem;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+.aiPanelToggle {
+  display: none;
+}
+.aiPanelBackdrop {
+  display: none;
+}
+
 .contactPanel {
   border-left: 1px solid var(--border);
   overflow-y: auto;
@@ -255,17 +290,71 @@
 @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ═══ Responsive ════════════════════════════════════════════════════════════ */
-@media (max-width: 1200px) { 
-  .inbox { grid-template-columns: 290px 1fr; } 
-  .contactPanel { display: none; } 
+/* Tablet: convList + chat main, AI panel → slide-in overlay from right */
+@media (max-width: 1200px) {
+  .inbox {
+    grid-template-columns: 280px 1fr;
+  }
+  .contactPanel {
+    display: none;
+  }
+  /* AI Panel: fixed overlay — hidden unless toggled */
+  .aiPanel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 300px;
+    max-width: 90vw;
+    z-index: 250;
+    transform: translateX(100%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: -8px 0 30px rgba(0, 0, 0, 0.5);
+    display: flex;
+    height: 100%;
+  }
+  .aiPanelOpen {
+    transform: translateX(0);
+  }
+  .aiPanelBackdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 249;
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(2px);
+  }
+  .aiPanelClose {
+    display: flex;
+  }
+  .aiPanelToggle {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: rgba(0, 212, 170, 0.08);
+    border: 1px solid rgba(0, 212, 170, 0.2);
+    color: var(--teal);
+    cursor: pointer;
+    font-size: 1rem;
+    flex-shrink: 0;
+    font-family: inherit;
+    transition: all 0.2s;
+  }
+  .aiPanelToggle:hover {
+    background: rgba(0, 212, 170, 0.15);
+  }
 }
-/* Mobile: convList เป็น overlay drawer — ไม่ซ่อนถาวร */
-@media (max-width: 768px) { 
-  .inbox { 
-    grid-template-columns: 1fr; 
+
+/* Mobile: single column — both convList + AI panel are overlays */
+@media (max-width: 768px) {
+  .inbox {
+    grid-template-columns: 1fr;
     position: relative;
   }
-  .convList { 
+  .convList {
     display: flex !important;
     position: fixed;
     inset: 0;
@@ -284,7 +373,6 @@
   .chatArea {
     width: 100%;
   }
-  /* Backdrop */
   .convBackdrop {
     display: none;
     position: fixed;
@@ -295,7 +383,6 @@
   .convBackdropOpen {
     display: block;
   }
-  /* Hamburger toggle  */
   .mobileToggle {
     display: flex !important;
     align-items: center;
@@ -310,7 +397,6 @@
     font-size: 1.2rem;
     flex-shrink: 0;
   }
-  /* Close button inside drawer */
   .drawerClose {
     position: absolute;
     top: 12px;
@@ -327,5 +413,44 @@
     align-items: center;
     justify-content: center;
     z-index: 10;
+  }
+
+  /* ── Mobile chat adjustments ── */
+  .chatHeader {
+    padding: 8px 10px;
+    gap: 8px;
+    min-height: 50px;
+  }
+  .messages {
+    padding: 10px 8px;
+    gap: 8px;
+  }
+  .msgBubble {
+    max-width: 85%;
+    padding: 10px 12px;
+    font-size: 0.85rem;
+  }
+  .msgMeta {
+    font-size: 0.62rem;
+  }
+  .aiSuggest {
+    margin: 0 8px 8px;
+    padding: 10px 12px;
+    font-size: 0.78rem;
+  }
+  .cannedPopup {
+    left: 8px;
+    right: 60px;
+    max-height: 200px;
+  }
+
+  /* AI Panel: full-width slide-in from right */
+  .aiPanel {
+    width: 100%;
+    max-width: 100vw;
+    z-index: 300;
+  }
+  .aiPanelBackdrop {
+    z-index: 299;
   }
 }

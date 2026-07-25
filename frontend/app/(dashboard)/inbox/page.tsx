@@ -483,6 +483,7 @@ export default function InboxPage() {
   const typingTimeout = useRef<NodeJS.Timeout | undefined>(undefined);
   // ─── Mobile drawer ─────────────────────────────────────────────────────
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
 
   // ─── Load conversations ───────────────────────────────────────────────────
   const loadConversations = useCallback(async () => {
