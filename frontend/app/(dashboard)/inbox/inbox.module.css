@@ -259,44 +259,19 @@
   .inbox { grid-template-columns: 290px 1fr; } 
   .contactPanel { display: none; } 
 }
-/* Mobile: convList เป็น overlay drawer — ไม่ซ่อนถาวร */
+/* Mobile: toggle between list view and chat view */
 @media (max-width: 768px) { 
   .inbox { 
     grid-template-columns: 1fr; 
     position: relative;
   }
-  .convList { 
-    display: flex !important;
-    position: fixed;
-    inset: 0;
-    z-index: 200;
-    width: 100%;
-    max-width: 100vw;
-    transform: translateX(-100%);
-    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
-    border-right: none;
-    background: rgba(7, 9, 19, 0.98);
-    backdrop-filter: blur(12px);
-  }
-  .convListOpen {
-    transform: translateX(0);
-  }
-  .chatArea {
-    width: 100%;
-  }
-  /* Backdrop */
-  .convBackdrop {
-    display: none;
-    position: fixed;
-    inset: 0;
-    z-index: 199;
-    background: rgba(0, 0, 0, 0.55);
-  }
-  .convBackdropOpen {
-    display: block;
-  }
-  /* Hamburger toggle  */
-  .mobileToggle {
+  .convList { display: flex !important; }
+  .chatArea { width: 100%; }
+  .showChat {} /* standalone for JS module ref */
+  .inbox.showChat .convList { display: none !important; }
+  .inbox:not(.showChat) .chatArea { display: none; }
+  /* Back button in chat header — show only on mobile */
+  .mobileBack {
     display: flex !important;
     align-items: center;
     justify-content: center;
@@ -309,23 +284,5 @@
     cursor: pointer;
     font-size: 1.2rem;
     flex-shrink: 0;
-  }
-  /* Close button inside drawer */
-  .drawerClose {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid var(--border);
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 1rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
   }
 }
