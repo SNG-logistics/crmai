@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../lib/api';
 import VisualKnowledgeManager from '../../../components/VisualKnowledgeManager';
+import KnowledgeFileManager from '../../../components/KnowledgeFileManager';
+import ChatTrainingExport from '../../../components/ChatTrainingExport';
 
 export default function BotPage() {
   const [bot, setBot] = useState<any>(null);
@@ -262,6 +264,14 @@ export default function BotPage() {
             ))}
             {qaItems.length === 0 && <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 20 }}>ยังไม่มี Knowledge Base เพิ่ม Q&A เพื่อให้ Bot ตอบได้ดีขึ้น</div>}
           </div>
+        </div>
+
+        <div style={{ marginTop: 20 }}>
+          <ChatTrainingExport companyId={companyId} companyName={companyName} />
+        </div>
+
+        <div style={{ marginTop: 20 }}>
+          <KnowledgeFileManager companyId={companyId} companyName={companyName} />
         </div>
 
         <div style={{ marginTop: 20 }}>

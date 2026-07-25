@@ -7,6 +7,7 @@ import sharp from 'sharp';
 import prisma from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
 import { analyzeKnowledgeImage, generateAIResponse, parseBotSettings, processBotMessage } from '../services/ai.service';
+import { KNOWLEDGE_FILE_EXTENSIONS, parseKnowledgeFile } from '../services/knowledge-file.service';
 const router = Router();
 router.use(verifyToken);
 
@@ -20,6 +21,15 @@ const visualKnowledgeUpload = multer({
     else cb(new Error('รองรับเฉพาะรูป JPG, PNG และ WEBP'));
   },
 });
+const documentKnowledgeUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 20 },
+  fileFilter: (_req, file, cb) => {
+    const extension = path.extname(file.originalname || '').toLocaleLowerCase();
+    if (KNOWLEDGE_FILE_EXTENSIONS.has(extension)) cb(null, true);
+    else cb(new Error(`ไม่รองรับไฟล์ ${extension || file.mimetype}`));
+  },
+});
 
 function acceptVisualKnowledgeUpload(req: Request, res: Response, next: NextFunction): void {
   visualKnowledgeUpload.single('image')(req, res, (error: any) => {
@@ -27,6 +37,18 @@ function acceptVisualKnowledgeUpload(req: Request, res: Response, next: NextFunc
     const message = error?.code === 'LIMIT_FILE_SIZE'
       ? 'รูปต้องมีขนาดไม่เกิน 10 MB'
       : (error?.message || 'อัปโหลดรูปไม่สำเร็จ');
+    res.status(400).json({ success: false, message });
+  });
+}
+
+function acceptDocumentKnowledgeUpload(req: Request, res: Response, next: NextFunction): void {
+  documentKnowledgeUpload.array('files', 20)(req, res, (error: any) => {
+    if (!error) return next();
+    const message = error?.code === 'LIMIT_FILE_SIZE'
+      ? 'แต่ละไฟล์ต้องมีขนาดไม่เกิน 25 MB'
+      : error?.code === 'LIMIT_FILE_COUNT'
+        ? 'อัปโหลดได้ครั้งละไม่เกิน 20 ไฟล์'
+        : (error?.message || 'อัปโหลดไฟล์ความรู้ไม่สำเร็จ');
     res.status(400).json({ success: false, message });
   });
 }
@@ -115,7 +137,8 @@ router.get('/knowledge', async (req: Request, res: Response) => {
     const bot = await prisma.botConfig.findFirst({ where: { companyId } });
     if (!bot) return res.json({ success: true, items: [], total: 0, hasMore: false });
     const sourceType = req.query.sourceType === 'visual' ? 'visual'
-      : req.query.sourceType === 'qa' ? 'qa' : undefined;
+      : req.query.sourceType === 'qa' ? 'qa'
+        : req.query.sourceType === 'document' ? 'document' : undefined;
     const where = { botConfigId: bot.id, ...(sourceType ? { sourceType } : {}) };
     const wantsPagination = req.query.page !== undefined || req.query.limit !== undefined;
     const page = Math.max(1, Number(req.query.page) || 1);
@@ -158,6 +181,76 @@ router.post('/knowledge', async (req: Request, res: Response) => {
 });
 
 // POST /api/bot/knowledge/visual — เพิ่มความรู้จากรูป + ข้อความ (เพิ่มได้ไม่จำกัดจำนวน)
+// Extract searchable knowledge from documents and Q&A tables.
+router.post('/knowledge/upload', acceptDocumentKnowledgeUpload, async (req: Request, res: Response) => {
+  try {
+    const files = (req.files as Express.Multer.File[] | undefined) || [];
+    if (!files.length) {
+      return res.status(400).json({ success: false, message: 'กรุณาเลือกไฟล์ความรู้อย่างน้อย 1 ไฟล์' });
+    }
+
+    const companyId = await resolveCompanyId(req);
+    const bot = await ensureBotConfig(req.tenantId!, companyId);
+    const category = cleanText(req.body?.category, 100) || 'เอกสาร';
+    const parsedFiles: Array<Awaited<ReturnType<typeof parseKnowledgeFile>>> = [];
+    const failures: Array<{ fileName: string; message: string }> = [];
+
+    for (const file of files) {
+      try {
+        parsedFiles.push(await parseKnowledgeFile(file, category));
+      } catch (error: any) {
+        failures.push({
+          fileName: path.basename(file.originalname || 'document'),
+          message: error?.message || 'อ่านไฟล์ไม่สำเร็จ',
+        });
+      }
+    }
+
+    const maxItemsPerUpload = 300;
+    const parsedCount = parsedFiles.reduce((sum, file) => sum + file.entries.length, 0);
+    const pendingItems = parsedFiles
+      .flatMap(parsed => parsed.entries.map(entry => ({
+        botConfigId: bot.id,
+        question: cleanText(entry.question, 1_000),
+        answer: cleanText(entry.answer, 20_000),
+        category: cleanText(entry.category || category, 100) || category,
+        sourceType: 'document',
+        sourceText: `นำเข้าจากไฟล์ ${parsed.fileName}`,
+        sendImage: false,
+        isActive: true,
+      })))
+      .filter(item => item.question && item.answer)
+      .slice(0, maxItemsPerUpload);
+
+    if (!pendingItems.length) {
+      return res.status(422).json({
+        success: false,
+        message: failures[0]?.message || 'ไม่พบข้อความที่นำมาใช้เป็นความรู้ได้',
+        failures,
+      });
+    }
+
+    const created = await prisma.knowledgeBase.createMany({ data: pendingItems });
+    return res.status(201).json({
+      success: true,
+      imported: created.count,
+      files: parsedFiles.map(file => ({
+        fileName: file.fileName,
+        entries: file.entries.length,
+        truncated: file.truncated,
+      })),
+      failures,
+      truncated: parsedCount > maxItemsPerUpload,
+    });
+  } catch (error: any) {
+    console.error('[Document Knowledge] import failed:', error);
+    return res.status(500).json({
+      success: false,
+      message: error?.message || 'อ่านและบันทึกไฟล์ความรู้ไม่สำเร็จ',
+    });
+  }
+});
+
 router.post('/knowledge/visual', acceptVisualKnowledgeUpload, async (req: Request, res: Response) => {
   const savedImagePaths: string[] = [];
   try {

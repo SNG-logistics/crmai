@@ -90,6 +90,220 @@ router.get('/stats', async (req: Request, res: Response) => {
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
 });
 
+function parseExportDate(value: unknown, endOfDay = false): Date | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  const date = new Date(endOfDay ? `${value}T23:59:59.999` : `${value}T00:00:00.000`);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+function anonymizeTrainingText(value: string, customerName?: string): string {
+  const withoutName = customerName?.trim()
+    ? value.split(customerName.trim()).join('[CUSTOMER]')
+    : value;
+  return withoutName
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[EMAIL]')
+    .replace(/(?:\+?(?:66|856)[\s-]?|0)\d(?:[\s-]?\d){7,10}/g, '[PHONE]');
+}
+
+function csvCell(value: unknown): string {
+  const text = value === null || value === undefined ? '' : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function trainingMessageContent(message: { type: string; content: string }): string {
+  if (message.type === 'text') return message.content.trim();
+  const label = message.type ? message.type.toLocaleUpperCase() : 'ATTACHMENT';
+  return `[${label}]`;
+}
+
+/** GET /api/conversations/training — list conversations that can be selected for AI datasets */
+router.get('/training', async (req: Request, res: Response) => {
+  try {
+    const {
+      companyId,
+      channel,
+      status,
+      search,
+      dateFrom,
+      dateTo,
+      page = '1',
+      limit = '50',
+    } = req.query;
+    const pageNumber = Math.max(1, Number(page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(limit) || 50));
+    const where: any = { tenantId: req.tenantId };
+    const allowed = await getUserCompanyIds(req.user!.id);
+
+    if (allowed) where.companyId = { in: allowed };
+    if (companyId && companyId !== 'all') {
+      if (allowed && !allowed.includes(String(companyId))) {
+        return res.json({ success: true, conversations: [], total: 0, page: pageNumber, limit: pageSize });
+      }
+      where.companyId = String(companyId);
+    }
+    if (channel && channel !== 'all') where.channel = String(channel);
+    if (status && status !== 'all') where.status = String(status);
+    if (search) where.contact = { displayName: { contains: String(search), mode: 'insensitive' } };
+
+    const from = parseExportDate(dateFrom);
+    const to = parseExportDate(dateTo, true);
+    if (from || to) {
+      where.lastMessageAt = {
+        ...(from ? { gte: from } : {}),
+        ...(to ? { lte: to } : {}),
+      };
+    }
+
+    const [conversations, total] = await Promise.all([
+      prisma.conversation.findMany({
+        where,
+        select: {
+          id: true,
+          channel: true,
+          status: true,
+          createdAt: true,
+          lastMessageAt: true,
+          contact: { select: { displayName: true } },
+          company: { select: { id: true, name: true } },
+          messages: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { content: true, type: true, senderType: true, createdAt: true },
+          },
+          _count: { select: { messages: true } },
+        },
+        orderBy: { lastMessageAt: 'desc' },
+        skip: (pageNumber - 1) * pageSize,
+        take: pageSize,
+      }),
+      prisma.conversation.count({ where }),
+    ]);
+
+    return res.json({ success: true, conversations, total, page: pageNumber, limit: pageSize });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error?.message || 'โหลดรายการแชทสำหรับ Export ไม่สำเร็จ' });
+  }
+});
+
+/** POST /api/conversations/export — export selected chats as JSONL or CSV */
+router.post('/export', async (req: Request, res: Response) => {
+  try {
+    const requestedIds = Array.from(new Set(
+      (Array.isArray(req.body?.conversationIds) ? req.body.conversationIds : [])
+        .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0),
+    ));
+    const format = req.body?.format === 'csv' ? 'csv' : 'jsonl';
+    const anonymize = req.body?.anonymize !== false;
+    if (!requestedIds.length) {
+      return res.status(400).json({ success: false, message: 'กรุณาเลือกแชทที่ต้องการ Export' });
+    }
+    if (requestedIds.length > 200) {
+      return res.status(400).json({ success: false, message: 'Export ได้ครั้งละไม่เกิน 200 แชท' });
+    }
+
+    const allowed = await getUserCompanyIds(req.user!.id);
+    const where: any = {
+      tenantId: req.tenantId,
+      id: { in: requestedIds },
+      ...(allowed ? { companyId: { in: allowed } } : {}),
+    };
+    const conversations = await prisma.conversation.findMany({
+      where,
+      include: {
+        contact: { select: { displayName: true } },
+        company: { select: { name: true } },
+        messages: {
+          orderBy: { createdAt: 'asc' },
+          select: { senderType: true, type: true, content: true, createdAt: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!conversations.length) {
+      return res.status(404).json({ success: false, message: 'ไม่พบแชทที่มีสิทธิ์ Export' });
+    }
+
+    const exportedAt = new Date().toISOString();
+    const dateStamp = exportedAt.slice(0, 10);
+
+    if (format === 'csv') {
+      const rows: string[][] = [[
+        'conversation_id',
+        'customer',
+        'company',
+        'channel',
+        'status',
+        'role',
+        'sender_type',
+        'message_type',
+        'content',
+        'created_at',
+      ]];
+      conversations.forEach((conversation, conversationIndex) => {
+        const conversationId = anonymize ? `conversation_${conversationIndex + 1}` : conversation.id;
+        const customer = anonymize ? `customer_${conversationIndex + 1}` : conversation.contact.displayName;
+        conversation.messages.forEach(message => {
+          let content = trainingMessageContent(message);
+          if (!content) return;
+          if (anonymize) content = anonymizeTrainingText(content, conversation.contact.displayName);
+          rows.push([
+            conversationId,
+            customer,
+            conversation.company?.name || '',
+            conversation.channel,
+            conversation.status,
+            message.senderType === 'customer' ? 'user' : 'assistant',
+            message.senderType,
+            message.type,
+            content,
+            message.createdAt.toISOString(),
+          ]);
+        });
+      });
+      const csv = '\uFEFF' + rows.map(row => row.map(csvCell).join(',')).join('\r\n');
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="crm-ai-training-${dateStamp}.csv"`);
+      return res.send(csv);
+    }
+
+    const jsonl: string[] = [];
+    conversations.forEach((conversation, conversationIndex) => {
+      const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+      for (const message of conversation.messages) {
+        const role: 'user' | 'assistant' = message.senderType === 'customer' ? 'user' : 'assistant';
+        let content = trainingMessageContent(message);
+        if (!content) continue;
+        if (anonymize) content = anonymizeTrainingText(content, conversation.contact.displayName);
+        const previous = messages[messages.length - 1];
+        if (previous?.role === role) previous.content += `\n${content}`;
+        else messages.push({ role, content });
+      }
+      if (!messages.some(message => message.role === 'user') || !messages.some(message => message.role === 'assistant')) return;
+      jsonl.push(JSON.stringify({
+        messages,
+        metadata: {
+          conversationId: anonymize ? `conversation_${conversationIndex + 1}` : conversation.id,
+          company: conversation.company?.name || null,
+          channel: conversation.channel,
+          status: conversation.status,
+          exportedAt,
+        },
+      }));
+    });
+    if (!jsonl.length) {
+      return res.status(422).json({
+        success: false,
+        message: 'แชทที่เลือกยังไม่มีทั้งคำถามลูกค้าและคำตอบจากแอดมิน/AI',
+      });
+    }
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="crm-ai-training-${dateStamp}.jsonl"`);
+    return res.send(jsonl.join('\n') + '\n');
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error?.message || 'Export แชทไม่สำเร็จ' });
+  }
+});
+
 /** GET /api/conversations/:id */
 router.get('/:id', async (req: Request, res: Response) => {
   try {
@@ -511,4 +725,3 @@ router.post('/:id/sync-line', async (req: Request, res: Response) => {
 });
 
 export default router;
-
