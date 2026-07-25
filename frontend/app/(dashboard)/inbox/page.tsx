@@ -941,10 +941,11 @@ export default function InboxPage() {
       <div className={styles.chatArea}>
         {!activeConv ? (
           <div className={styles.noChatSelected}>
+            <button className={styles.mobileToggle} onClick={() => setDrawerOpen(true)} aria-label="เปิดรายชื่อ" style={{ position: 'absolute', top: 16, left: 16, margin: 0 }}>☰</button>
             <div style={{ fontSize: '5rem', marginBottom: 16, animation: 'pulse 2s infinite' }}>💬</div>
             <div style={{ fontSize: '1.2rem', fontWeight: 600 }}>เลือกบทสนทนา</div>
             <div style={{ color: 'var(--text-muted)', marginTop: 8, fontSize: '0.9rem' }}>
-              คลิกที่บทสนทนาด้านซ้ายเพื่อเริ่มต้น
+              แตะ ☰ มุมซ้ายบนเพื่อเปิดรายชื่อ
             </div>
             <div style={{ marginTop: 24, display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
               {[`📬 ${conversations.length} บทสนทนา`, `🤖 Bot พร้อมตอบ`, `⚡ Real-time`].map(s => (
