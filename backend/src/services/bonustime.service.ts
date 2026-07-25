@@ -9,6 +9,8 @@
  * ทุกอย่างตั้งค่าได้จากหน้า CRM › ตั้งค่า › BONUS TIME
  */
 
+import prisma from '../lib/prisma';
+
 // ─── Types (โครงหลวมๆ ให้ตรงกับ prisma models) ───────────────────────────────
 export interface BTConfig {
   isActive: boolean;
@@ -51,7 +53,10 @@ export const DEFAULT_BONUS_KEYWORDS = [
   'โบนัดทาม', 'บอนัสทาม', 'โบนัสไทมส์', 'โบนัสตาม',
   'winrate', 'win rate', 'วินเรท', 'วินเรต', 'วินเรด', 'อัตราชนะ', 'อัตราการชนะ',
   'ai winrate', 'ระบบวิเคราะห์', 'ระบบ ai', 'เปอร์เซ็นต์เกม', 'เปอร์เซ็นเกม', '% เกม',
-  'ค่ายไหนแตก', 'ค่ายไหนดี', 'ดูอัตราชนะ', 'เช็คเกม', 'เช็กเกม', 'ดูค่ายเกม',
+  'ค่ายไหนแตก', 'ค่ายไหนดี', 'เกมไหนแตก', 'เกมไหนแตกดี', 'เกมแตกดี', 'เกมอะไรแตก',
+  'ดูอัตราชนะ', 'เช็คเกม', 'เช็กเกม', 'ดูค่ายเกม',
+  'ເກມໃດແຕກ', 'ເກມໃດແຕກດີ', 'ເກມແຕກດີ', 'ເກມໃດດີ',
+  'ຄ່າຍໃດແຕກ', 'ຄ່າຍໃດແຕກດີ', 'ອັດຕາຊະນະ', 'ເຊັກເກມ',
 ];
 
 // normalize สำหรับ fuzzy match: ตัดวรรณยุกต์/การันต์ไทย + ช่องว่าง/สัญลักษณ์ทั้งหมด
@@ -60,7 +65,7 @@ function normalizeBT(s: string): string {
   return (s || '')
     .toLowerCase()
     .replace(/[็-๎]/g, '')      // ่ ้ ๊ ๋ ็ ์ ํ ๎
-    .replace(/[^a-z0-9ก-๙]+/g, '');       // ตัดช่องว่าง อีโมจิ เครื่องหมาย
+    .replace(/[^a-z0-9ก-๙\u0E80-\u0EFF]+/g, '');       // ตัดช่องว่าง อีโมจิ เครื่องหมาย
 }
 
 // ─── ตัวช่วย ─────────────────────────────────────────────────────────────────
@@ -108,6 +113,60 @@ export function matchBonusTimeKeyword(text: string, config?: Pick<BTConfig, 'key
     const nk = normalizeBT(k);
     return nk.length >= 4 && nt.includes(nk);
   });
+}
+
+/**
+ * WhatsApp ไม่มี Flex/postback แบบ LINE จึงสรุปข้อมูลชุดเดียวกันจาก BONUSTIME
+ * เป็นข้อความ โดยเลือกเกม active ที่มี win rate สูงสุดในขณะตอบ
+ */
+export async function buildBonusTimeWhatsAppReply(opts: {
+  tenantId: string;
+  companyId: string;
+  userMessage: string;
+  language?: 'th' | 'lo';
+  force?: boolean;
+}): Promise<string | null> {
+  const { tenantId, companyId, userMessage, language = 'th', force = false } = opts;
+  const config = await prisma.bonusTimeConfig.findUnique({ where: { companyId } }).catch(() => null);
+  if (!config?.isActive || (!force && !matchBonusTimeKeyword(userMessage, config))) return null;
+
+  const camps = await prisma.bonusTimeCamp.findMany({
+    where: { tenantId, isActive: true },
+    select: { id: true, name: true },
+    orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+  });
+  if (!camps.length) return null;
+
+  const campNames = new Map(camps.map(camp => [camp.id, camp.name]));
+  const games = await prisma.bonusTimeGame.findMany({
+    where: { tenantId, isActive: true, campId: { in: camps.map(camp => camp.id) } },
+    orderBy: [{ winRate: 'desc' }, { order: 'asc' }, { createdAt: 'asc' }],
+    take: 5,
+  });
+
+  const title = (config.headerTitle || '').trim() || '⚡ BONUS TIME ⚡';
+  const intro = (config.gamesIntro || config.intro || '').trim();
+  const footer = (config.footerNote || '').trim();
+  if (!games.length) {
+    const campList = camps.slice(0, 12).map((camp, index) => `${index + 1}. ${camp.name}`).join('\n');
+    return language === 'lo'
+      ? `${title}\n${intro || 'ຄ່າຍເກມທີ່ເປີດໃຊ້ງານຕອນນີ້'}\n\n${campList}${footer ? `\n\n${footer}` : ''}`
+      : `${title}\n${intro || 'ค่ายเกมที่เปิดใช้งานตอนนี้'}\n\n${campList}${footer ? `\n\n${footer}` : ''}`;
+  }
+
+  const rows = games.map((game, index) => {
+    const win = jitter(game.winRate, config.liveJitter);
+    const freeSpin = jitter(game.freeSpinRate, config.liveJitter);
+    const wild = jitter(game.wildRate, config.liveJitter);
+    const camp = campNames.get(game.campId) || game.provider || '';
+    const stats = language === 'lo'
+      ? `ອັດຕາຊະນະ ${win}% | ຟຣີສະປິນ ${freeSpin}% | WILD ${wild}%`
+      : `อัตราชนะ ${win}% | ฟรีสปิน ${freeSpin}% | WILD ${wild}%`;
+    return `${index + 1}. 🔥 ${game.name}${camp ? ` (${camp})` : ''}\n   ${stats}${game.link ? `\n   ${game.link}` : ''}`;
+  }).join('\n\n');
+
+  const heading = language === 'lo' ? 'ເກມທີ່ຄ່າສະຖິຕິສູງຕອນນີ້' : 'เกมที่ค่าสถิติสูงตอนนี้';
+  return `${title}\n${intro ? `${intro}\n` : ''}${heading}\n\n${rows}${footer ? `\n\n${footer}` : ''}`;
 }
 
 // ─── LUX gold palette (LINE flex — โทนทองหรู) ────────────────────────────────

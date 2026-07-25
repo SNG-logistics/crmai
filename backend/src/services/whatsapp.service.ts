@@ -25,9 +25,12 @@ import {
   buildRegisterReply,
   captureCustomerInfo,
   isRegisterIntent,
+  missingRegisterFields,
   mightContainCustomerInfo,
+  normalizeCustomerPhone,
   readProfile,
 } from './contact-memory.service';
+import { buildBonusTimeWhatsAppReply } from './bonustime.service';
 import { verifySlip } from './slip-verify.service';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -49,11 +52,45 @@ const qrCache   = new Map<string, string>();    // accountId → base64 QR
 const statusMap = new Map<string, WAStatus>();  // accountId → status
 const phoneMap  = new Map<string, string>();    // accountId → phone
 const ctxMap    = new Map<string, AccountCtx>();// accountId → ctx (tenant/company/session)
+const registrationReplyTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const REGISTRATION_IDLE_MS = 12_000;
 
 // conversation.channelId ของ whatsapp = "<accountId>:<jid>" เพื่อแยกเบอร์
 // (ลูกค้าคนเดียวทักหลายเบอร์ = คนละบทสนทนา ไม่ชน @@unique([tenantId,channel,channelId]))
 export function waChannelId(accountId: string, jid: string): string {
   return `${accountId}:${jid}`;
+}
+
+function phoneFromWhatsAppIdentifier(value?: string | null): string | undefined {
+  if (!value || /@lid$/i.test(value)) return undefined;
+  if (/^.+@s\.whatsapp\.net$/i.test(value)) {
+    return normalizeCustomerPhone(jidNormalizedUser(value).split('@')[0].split(':')[0]);
+  }
+  return normalizeCustomerPhone(value);
+}
+
+async function resolveCustomerPhone(sock: WASocket, msg: any, jid: string): Promise<string | undefined> {
+  const directCandidates = [
+    msg.key?.remoteJidAlt,
+    msg.key?.participantAlt,
+    msg.key?.remoteJidUsername,
+    jid,
+  ];
+  for (const candidate of directCandidates) {
+    const phone = phoneFromWhatsAppIdentifier(candidate);
+    if (phone) return phone;
+  }
+
+  if (/@lid$/i.test(jid)) {
+    try {
+      const mapped = await sock.signalRepository.lidMapping.getPNForLID(jid);
+      const phone = phoneFromWhatsAppIdentifier(mapped);
+      if (phone) return phone;
+    } catch (error: any) {
+      console.warn(`[WA] LID mapping unavailable jid=${jid}:`, error?.message || error);
+    }
+  }
+  return undefined;
 }
 
 function isDepositNotCredited(text: string): boolean {
@@ -173,7 +210,7 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
   try {
     const { tenantId, companyId, accountId } = ctx;
     const jid     = msg.key.remoteJid as string;
-    const phone   = jid.replace('@s.whatsapp.net', '');
+    const phone   = await resolveCustomerPhone(sock, msg, jid);
     const content = extractMessageText(msg.message);
     const msgType = detectMsgType(msg.message);
     const platformMsgId = msg.key.id;
@@ -182,13 +219,40 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
     const mediaMeta = await downloadWhatsAppMedia(sock, msg, msgType);
 
     // 1. Contact (ระดับ tenant — ลูกค้าคนเดียวใช้ contact เดียวข้ามบริษัทได้)
-    let contact = await prisma.contact.findFirst({ where: { tenantId, whatsappId: jid } });
+    let contact = await prisma.contact.findFirst({
+      where: {
+        tenantId,
+        OR: [
+          { whatsappId: jid },
+          ...(phone ? [{ phone }] : []),
+        ],
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
     if (!contact) {
       contact = await prisma.contact.create({
-        data: { tenantId, displayName: msg.pushName || phone, phone, whatsappId: jid },
+        data: {
+          tenantId,
+          displayName: msg.pushName || phone || 'ลูกค้า WhatsApp',
+          phone,
+          whatsappId: jid,
+        },
       });
-    } else if (msg.pushName && contact.displayName !== msg.pushName) {
-      await prisma.contact.update({ where: { id: contact.id }, data: { displayName: msg.pushName } });
+    } else {
+      const contactUpdate: { displayName?: string; phone?: string } = {};
+      if (msg.pushName && contact.displayName !== msg.pushName) contactUpdate.displayName = msg.pushName;
+      else if (phone && (!contact.displayName || /@lid$/i.test(contact.displayName))) contactUpdate.displayName = phone;
+      if (phone && contact.phone !== phone) contactUpdate.phone = phone;
+      if (contact.whatsappId !== jid) {
+        contact = await prisma.contact.update({
+          where: { id: contact.id },
+          data: { ...contactUpdate, whatsappId: jid },
+        });
+        Object.keys(contactUpdate).forEach(key => delete (contactUpdate as any)[key]);
+      }
+      if (Object.keys(contactUpdate).length) {
+        contact = await prisma.contact.update({ where: { id: contact.id }, data: contactUpdate });
+      }
     }
 
     // 2. Conversation — ผูกกับ "เบอร์" (account) + บริษัท
@@ -215,7 +279,7 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
         senderType: 'customer', type: msgType,
         content: content || `[${msgType}]`,
         platformMsgId,
-        metadata: JSON.stringify({ waJid: jid, pushName: msg.pushName, ...mediaMeta }),
+        metadata: JSON.stringify({ waJid: jid, waPhone: phone, pushName: msg.pushName, ...mediaMeta }),
       },
     });
     await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
@@ -244,10 +308,81 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
   }
 }
 
+function isRegistrationDoneSignal(text: string): boolean {
+  return /^(?:เสร็จ(?:แล้ว)?|ครบ(?:แล้ว)?|ส่งครบ(?:แล้ว)?|เรียบร้อย|done|finish(?:ed)?|ສຳເລັດ(?:ແລ້ວ)?|ຄົບ(?:ແລ້ວ)?|ສົ່ງຄົບ(?:ແລ້ວ)?|ແລ້ວ)[.! ]*$/i.test((text || '').trim());
+}
+
+function cancelRegistrationReply(conversationId: string) {
+  const timer = registrationReplyTimers.get(conversationId);
+  if (timer) clearTimeout(timer);
+  registrationReplyTimers.delete(conversationId);
+}
+
+async function sendStoredBotText(
+  ctx: AccountCtx,
+  conversationId: string,
+  jid: string,
+  reply: string,
+  metadata?: Record<string, unknown>,
+) {
+  await trySend(ctx.accountId, jid, reply);
+  const botMsg = await prisma.message.create({
+    data: {
+      conversationId,
+      tenantId: ctx.tenantId,
+      senderType: 'bot',
+      type: 'text',
+      content: reply,
+      metadata: metadata && Object.keys(metadata).length ? JSON.stringify(metadata) : undefined,
+    },
+  });
+  emitToTenant(ctx.tenantId, 'new_message', {
+    conversationId,
+    companyId: ctx.companyId,
+    channel: 'whatsapp',
+    message: { ...botMsg, senderType: 'bot' },
+  });
+}
+
+function scheduleRegistrationReply(
+  ctx: AccountCtx,
+  conversationId: string,
+  contactId: string,
+  jid: string,
+  language: 'th' | 'lo',
+) {
+  cancelRegistrationReply(conversationId);
+  const timer = setTimeout(() => {
+    void (async () => {
+      try {
+        const conversation = await prisma.conversation.findFirst({
+          where: { id: conversationId, tenantId: ctx.tenantId },
+          select: { isBot: true },
+        });
+        if (!conversation?.isBot) return;
+        const contact = await prisma.contact.findFirst({ where: { id: contactId, tenantId: ctx.tenantId } });
+        if (!contact) return;
+        const profile = readProfile(contact as any);
+        const reply = buildRegisterReply(profile, language);
+        const flow = missingRegisterFields(profile).length ? 'registration' : 'registration_complete';
+        await sendStoredBotText(ctx, conversationId, jid, reply, { flow });
+      } catch (error: any) {
+        console.error('[WA] Delayed registration reply error:', error?.message || error);
+      } finally {
+        registrationReplyTimers.delete(conversationId);
+      }
+    })();
+  }, REGISTRATION_IDLE_MS);
+  registrationReplyTimers.set(conversationId, timer);
+}
+
 // ─── AI Bot reply via WhatsApp ────────────────────────────────────────────────
 async function processBotReply(ctx: AccountCtx, conversationId: string, contactId: string, userMessage: string, jid: string) {
   const { tenantId, companyId, accountId } = ctx;
   try {
+    // ลูกค้าอาจกำลังส่งข้อมูลสมัครทีละข้อความ: ทุกข้อความใหม่ต้องเริ่มนับช่วงเงียบใหม่
+    cancelRegistrationReply(conversationId);
+
     // 🛡️ กันสแปมถามซ้ำเผา token → ตอบ auto ครั้งเดียว + สลับเป็น human (ไม่เรียก AI)
     const abuse = await checkRepeatAbuse(conversationId, userMessage);
     if (abuse.repeat) {
@@ -283,10 +418,12 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
     try { lastBotMeta = JSON.parse((lastBot as any)?.metadata || '{}'); } catch { lastBotMeta = {}; }
     const registerIntent = isRegisterIntent(userMessage);
     const hasCustomerInfo = mightContainCustomerInfo(userMessage);
+    const registrationDone = isRegistrationDoneSignal(userMessage);
     const registrationFlow = registerIntent || lastBotMeta.flow === 'registration';
 
     let profile = readProfile(contact as any);
-    if (hasCustomerInfo) {
+    let capturedCustomerInfo = false;
+    if (hasCustomerInfo || (lastBotMeta.flow === 'registration' && !registrationDone)) {
       const captured = await captureCustomerInfo({
         tenantId,
         contactId,
@@ -294,8 +431,11 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
         registrationFlow,
         channel: 'whatsapp',
       });
-      if (captured) profile = captured;
-      emitToTenant(tenantId, 'conversation_updated', { id: conversationId });
+      if (captured) {
+        profile = captured;
+        capturedCustomerInfo = true;
+        emitToTenant(tenantId, 'conversation_updated', { id: conversationId });
+      }
     }
 
     let reply: string;
@@ -305,13 +445,32 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
       await prisma.slipVerification.count({ where: { conversationId } }) > 0
       || await prisma.message.count({ where: { conversationId, senderType: 'customer', type: 'image' } }) > 0
     );
+    const bonusTimeReply = hasEarlierSlip ? null : await buildBonusTimeWhatsAppReply({
+      tenantId,
+      companyId,
+      userMessage,
+      language,
+    });
     if (hasEarlierSlip) {
       reply = language === 'lo'
         ? 'ແອດມິນໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ກຳລັງດຳເນີນການກວດສອບໃຫ້ ລໍຖ້າຈັກຄູ່ເຈົ້າ'
         : 'แอดมินได้รับสลิปแล้วค่ะ กำลังดำเนินการตรวจสอบให้ รอสักครู่นะคะ';
-    } else if ((registerIntent && !hasCustomerInfo) || (registrationFlow && hasCustomerInfo)) {
+    } else if (bonusTimeReply) {
+      reply = bonusTimeReply;
+      responseFlow = 'bonustime';
+    } else if (registerIntent && !hasCustomerInfo) {
       reply = buildRegisterReply(profile, language);
-      responseFlow = 'registration';
+      responseFlow = missingRegisterFields(profile).length ? 'registration' : 'registration_complete';
+    } else if (registrationFlow && (hasCustomerInfo || capturedCustomerInfo)) {
+      if (missingRegisterFields(profile).length > 0) {
+        scheduleRegistrationReply(ctx, conversationId, contactId, jid, language);
+        return;
+      }
+      reply = buildRegisterReply(profile, language);
+      responseFlow = 'registration_complete';
+    } else if (registrationFlow && registrationDone) {
+      reply = buildRegisterReply(profile, language);
+      responseFlow = missingRegisterFields(profile).length ? 'registration' : 'registration_complete';
     } else {
       const result = await processBotMessage(
         tenantId,

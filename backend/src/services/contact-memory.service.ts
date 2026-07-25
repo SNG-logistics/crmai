@@ -25,13 +25,52 @@ function parseCustomFields(contact: { customFields?: string | null }): any {
   try { return JSON.parse(contact.customFields || '{}'); } catch { return {}; }
 }
 
+export function normalizeCustomerPhone(value?: string | null): string | undefined {
+  if (!value || typeof value !== 'string' || /@(?:lid|s\.whatsapp\.net)|\blid\b/i.test(value)) return undefined;
+  let digits = value.replace(/\D/g, '');
+  if (digits.startsWith('00')) digits = digits.slice(2);
+  if (digits.length < 8 || digits.length > 15 || /^(\d)\1+$/.test(digits)) return undefined;
+  return digits;
+}
+
+export function normalizeBankAccount(value?: string | null): string | undefined {
+  if (!value || typeof value !== 'string' || /@(?:lid|s\.whatsapp\.net)|\blid\b/i.test(value)) return undefined;
+  const digits = value.replace(/\D/g, '');
+  if (digits.length < 6 || digits.length > 24 || /^(\d)\1+$/.test(digits)) return undefined;
+  return digits;
+}
+
+function cleanTextField(value: unknown, maxLength: number, genericLabels: RegExp): string | undefined {
+  if (!value || typeof value !== 'string') return undefined;
+  const cleaned = value.trim().replace(/\s+/g, ' ').slice(0, maxLength);
+  if (
+    !cleaned
+    || cleaned.toLowerCase() === 'null'
+    || cleaned === '-'
+    || /@(?:lid|s\.whatsapp\.net)|\blid\b/i.test(cleaned)
+    || genericLabels.test(cleaned)
+    || !/[a-zA-Zก-๙\u0E80-\u0EFF]/.test(cleaned)
+  ) return undefined;
+  return cleaned;
+}
+
 export function readProfile(contact: { customFields?: string | null; phone?: string | null; username?: string | null; firstName?: string | null; lastName?: string | null }): CrmProfile {
   const cf = parseCustomFields(contact);
   const p: CrmProfile = { ...(cf.crm_profile || {}) };
+  p.phone = normalizeCustomerPhone(p.phone);
+  p.bankAccount = normalizeBankAccount(p.bankAccount);
+  p.fullName = cleanTextField(p.fullName, 120, /^(?:ชื่อ|ชื่อ\s*[-–—]?\s*(?:สกุล|นามสกุล)|ຊື່|ຊື່\s*[-–—]?\s*ນາມສະກຸນ)$/i);
+  p.bankName = cleanTextField(p.bankName, 80, /^(?:ธนาคาร|ชื่อธนาคาร|ທະນາຄານ)$/i);
   // fields หลักบน Contact เติมช่องว่าง
-  if (!p.phone && contact.phone) p.phone = contact.phone;
+  if (!p.phone && contact.phone) p.phone = normalizeCustomerPhone(contact.phone);
   if (!p.gameUsername && contact.username) p.gameUsername = contact.username;
-  if (!p.fullName && (contact.firstName || contact.lastName)) p.fullName = [contact.firstName, contact.lastName].filter(Boolean).join(' ');
+  if (!p.fullName && (contact.firstName || contact.lastName)) {
+    p.fullName = cleanTextField(
+      [contact.firstName, contact.lastName].filter(Boolean).join(' '),
+      120,
+      /^(?:ชื่อ|ชื่อ\s*[-–—]?\s*(?:สกุล|นามสกุล)|ຊື່|ຊື່\s*[-–—]?\s*ນາມສະກຸນ)$/i,
+    );
+  }
   return p;
 }
 
@@ -76,7 +115,7 @@ export function buildRegisterReply(p: CrmProfile, language: 'th' | 'lo' = 'th'):
       return `ຂໍ້ມູນທີ່ໄດ້ຮັບແລ້ວເຈົ້າ\n${have}\n\nລົບກວນແຈ້ງເພີ່ມອີກໜ້ອຍເຈົ້າ\n${need}`;
     }
     const all = REGISTER_FIELDS.map(f => `✅${labels[f.key]}: ${p[f.key]}`).join('\n');
-    return `ລູກຄ້າເຄີຍແຈ້ງຂໍ້ມູນໄວ້ຄົບແລ້ວເຈົ້າ\n${all}\n\nກະລຸນາຢືນຢັນວ່າຂໍ້ມູນຖືກຕ້ອງບໍ່ເຈົ້າ`;
+    return `ຢືນຢັນຂໍ້ມູນການສະໝັກຂອງລູກຄ້າແມ່ນ\n${all}\n\nລະບົບບັນທຶກຂໍ້ມູນໃຫ້ແລ້ວເຈົ້າ ຖ້າມີຈຸດໃດບໍ່ຖືກ ແຈ້ງແກ້ໄຂໄດ້ເລີຍເຈົ້າ`;
   }
   if (missing.length === REGISTER_FIELDS.length) {
     // ยังไม่มีข้อมูลเลย → ขอทั้งชุด (ฟอร์มมาตรฐาน)
@@ -90,7 +129,7 @@ export function buildRegisterReply(p: CrmProfile, language: 'th' | 'lo' = 'th'):
   }
   // ครบแล้ว → ทวนยืนยัน ไม่ขอซ้ำ
   const all = REGISTER_FIELDS.map(f => `✅${f.label} : ${p[f.key]}`).join('\n');
-  return `ลูกค้าเคยแจ้งข้อมูลไว้ครบแล้วนะคะ🥰\n${all}\n\nรบกวนยืนยันว่าข้อมูลถูกต้องไหมคะ ถ้ามีจุดไหนไม่ถูกแจ้งแก้ได้เลยค่ะ`;
+  return `ยืนยันข้อมูลการสมัครของลูกค้าดังนี้ค่ะ\n${all}\n\nระบบบันทึกข้อมูลให้แล้วนะคะ หากมีจุดไหนไม่ถูกต้องแจ้งแก้ไขได้เลยค่ะ`;
 }
 
 // ข้อความนี้น่าจะมี "ข้อมูลจริง" ของลูกค้าไหม — เข้มงวด: ต้องมีตัวเลขยาว (เบอร์/บัญชี)
@@ -118,7 +157,8 @@ function labeledValue(text: string, label: RegExp): string | undefined {
       .trim();
     if (sameLine) return sameLine;
     const nextLine = lines[i + 1]?.replace(/^[\s:：=\-–—]+/, '').trim();
-    if (nextLine && !/[:：]$/.test(nextLine)) return nextLine;
+    const looksLikeAnotherField = /^(?:[✅✔☑•*_-]\s*)?(?:ชื่อ|นามสกุล|สกุล|เบอร์|โทรศัพท์|ธนาคาร|บัญชี|เลข\s*บัญชี|ยูส|username|ຊື່|ນາມສະກຸນ|ເບີໂທ|ທະນາຄານ|ເລກ\s*ບັນຊີ|ຢູສເຊີ)/i.test(nextLine || '');
+    if (nextLine && !/[:：]$/.test(nextLine) && !looksLikeAnotherField) return nextLine;
   }
   return undefined;
 }
@@ -149,19 +189,12 @@ export function extractStructuredCustomerInfo(text: string): CrmProfile {
     text,
     /(?:ยูสเซอร์(?:เนม)?|ยูสเกม|ชื่อผู้ใช้|username|user\s*id|ຢູສເຊີ|ຊື່ຜູ້ໃຊ້)/i,
   );
-  const phone = (phoneRaw || '').replace(/[^\d+]/g, '');
-  const bankAccount = (bankAccountRaw || '').replace(/\D/g, '');
-  const cleanValue = (value?: string, max = 120) => {
-    const cleaned = (value || '').trim().slice(0, max);
-    return cleaned && !/^(?:-|ไม่มี|ບໍ່ມີ)$/i.test(cleaned) ? cleaned : undefined;
-  };
-
   return {
-    fullName: cleanValue(fullName),
-    phone: phone.replace(/\D/g, '').length >= 7 ? phone : undefined,
-    bankName: cleanValue(bankName, 80),
-    bankAccount: bankAccount.length >= 6 ? bankAccount : undefined,
-    gameUsername: cleanValue(gameUsername, 100),
+    fullName: cleanTextField(fullName, 120, /^(?:ชื่อ|ชื่อ\s*[-–—]?\s*(?:สกุล|นามสกุล)|ຊື່|ຊື່\s*[-–—]?\s*ນາມສະກຸນ)$/i),
+    phone: normalizeCustomerPhone(phoneRaw),
+    bankName: cleanTextField(bankName, 80, /^(?:ธนาคาร|ชื่อธนาคาร|ທະນາຄານ)$/i),
+    bankAccount: normalizeBankAccount(bankAccountRaw),
+    gameUsername: cleanTextField(gameUsername, 100, /^(?:ยูส|ยูสเซอร์|username|ຢູສເຊີ)$/i),
   };
 }
 
@@ -180,12 +213,16 @@ export async function captureCustomerInfo(opts: {
     if (!contact) return null;
     const existing = readProfile(contact as any);
 
-    const convo = recentMessages.slice(-6)
+    const recent = recentMessages.slice(-10);
+    const convo = recent
       .map(m => `${m.role === 'user' ? 'ลูกค้า' : 'แอดมิน'}: ${m.content}`)
       .join('\n');
-    const deterministic = extractStructuredCustomerInfo(
-      recentMessages.filter(message => message.role === 'user').slice(-6).map(message => message.content).join('\n'),
-    );
+    const customerMessages = recent.filter(message => message.role === 'user');
+    const customerOnlyText = customerMessages.map(message => message.content).join('\n');
+    const deterministic = customerMessages.reduce<CrmProfile>((result, message) => ({
+      ...result,
+      ...extractStructuredCustomerInfo(message.content),
+    }), {});
 
     let parsed: any = {};
     try {
@@ -194,7 +231,13 @@ export async function captureCustomerInfo(opts: {
           role: 'system',
           content: `สกัดข้อมูลส่วนตัวของ "ลูกค้า" จากบทสนทนา ตอบ JSON เท่านั้น:
 {"fullName":"ชื่อ-นามสกุลจริง หรือ null","phone":"เบอร์โทร (ตัวเลขล้วน) หรือ null","bankName":"ชื่อธนาคาร หรือ null","bankAccount":"เลขบัญชี (ตัวเลขล้วน) หรือ null","gameUsername":"ยูสเซอร์เนม หรือ null"}
-กฎ: เอาเฉพาะข้อมูลที่ลูกค้าพิมพ์เอง ห้ามเดา ห้ามเอาชื่อ LINE display มาเป็น fullName ถ้าไม่มีให้ใส่ null`,
+กฎ:
+- เอาเฉพาะข้อมูลที่ลูกค้าพิมพ์เอง ห้ามเดา และห้ามคัดค่าจากข้อความของแอดมิน/บอท
+- ใช้ข้อความของแอดมินได้เพียงเพื่อรู้ว่ากำลังถามช่องใด
+- ข้อมูลที่บันทึกไว้แล้วคือ ${JSON.stringify(existing)} ให้ใช้เพื่อรู้ว่าช่องใดยังขาดเท่านั้น ห้ามส่งค่าชุดนี้กลับมาเป็นผลการสกัด
+- ตัวเลขที่ไม่แน่ใจว่าเป็นเบอร์โทรหรือเลขบัญชีให้ใส่ null
+- ห้ามเอา LINE display, WhatsApp JID, ค่า @lid หรือหัวข้อฟอร์มเปล่ามาเป็นข้อมูล
+- ถ้าไม่มีหลักฐานชัดเจนให้ใส่ null`,
         },
         { role: 'user', content: convo },
       ], process.env.COMETAPI_LIGHT_MODEL || 'gpt-4o-mini', 0.1, 200);
@@ -207,31 +250,48 @@ export async function captureCustomerInfo(opts: {
       console.warn('[ContactMemory] AI extraction unavailable; using deterministic registration parser:', error.message);
     }
 
-    const clean = (v: any, maxLength: number) => {
-      if (!v || typeof v !== 'string') return undefined;
-      const s = v.trim().slice(0, maxLength);
-      if (!s || s.toLowerCase() === 'null' || s === '-') return undefined;
-      return s;
+    const normalizedEvidence = customerOnlyText.toLowerCase().replace(/\s+/g, '');
+    const hasTextEvidence = (value: unknown) => {
+      if (!value || typeof value !== 'string') return false;
+      const needle = value.toLowerCase().replace(/\s+/g, '');
+      return needle.length >= 2 && normalizedEvidence.includes(needle);
     };
-    const phone = clean(parsed.phone, 24)?.replace(/[^\d+]/g, '');
-    const bankAccount = clean(parsed.bankAccount, 40)?.replace(/[^\d]/g, '');
+    const hasDigitEvidence = (value: unknown) => {
+      if (!value || typeof value !== 'string') return false;
+      const digits = value.replace(/\D/g, '');
+      return digits.length >= 6 && customerOnlyText.replace(/\D/g, '').includes(digits);
+    };
+    const aiFullName = hasTextEvidence(parsed.fullName)
+      ? cleanTextField(parsed.fullName, 120, /^(?:ชื่อ|ชื่อ\s*[-–—]?\s*(?:สกุล|นามสกุล)|ຊື່|ຊື່\s*[-–—]?\s*ນາມສະກຸນ)$/i)
+      : undefined;
+    const aiBankName = hasTextEvidence(parsed.bankName)
+      ? cleanTextField(parsed.bankName, 80, /^(?:ธนาคาร|ชื่อธนาคาร|ທະນາຄານ)$/i)
+      : undefined;
+    const aiGameUsername = hasTextEvidence(parsed.gameUsername)
+      ? cleanTextField(parsed.gameUsername, 100, /^(?:ยูส|ยูสเซอร์|username|ຢູສເຊີ)$/i)
+      : undefined;
     const found: CrmProfile = {
-      fullName: deterministic.fullName || clean(parsed.fullName, 120),
-      phone: deterministic.phone || (phone && phone.replace(/\D/g, '').length >= 7 ? phone : undefined),
-      bankName: deterministic.bankName || clean(parsed.bankName, 80),
-      bankAccount: deterministic.bankAccount || (bankAccount && bankAccount.length >= 6 ? bankAccount : undefined),
-      gameUsername: deterministic.gameUsername || clean(parsed.gameUsername, 100),
+      fullName: deterministic.fullName || aiFullName,
+      phone: deterministic.phone || (hasDigitEvidence(parsed.phone) ? normalizeCustomerPhone(parsed.phone) : undefined),
+      bankName: deterministic.bankName || aiBankName,
+      bankAccount: deterministic.bankAccount || (hasDigitEvidence(parsed.bankAccount) ? normalizeBankAccount(parsed.bankAccount) : undefined),
+      gameUsername: deterministic.gameUsername || aiGameUsername,
     };
     // ไม่เจออะไรใหม่เลย → จบ
     if (!found.fullName && !found.phone && !found.bankName && !found.bankAccount && !found.gameUsername) return null;
 
-    // merge: ค่าใหม่ทับค่าเก่า (กรณีลูกค้าแก้ข้อมูล) แต่ค่า undefined ไม่ทับ
+    // ค่า AI ที่ไม่มี label เติมเฉพาะช่องว่าง เพื่อลดโอกาสเลขชุดใหม่ไปทับเบอร์/บัญชีเดิมผิดช่อง
+    // ค่า deterministic มาจาก label ที่ลูกค้าพิมพ์ชัดเจน จึงอนุญาตให้แก้ค่าปัจจุบันได้
     const merged: CrmProfile = { ...existing };
     let changed = false;
     (['fullName', 'phone', 'bankName', 'bankAccount', 'gameUsername'] as const).forEach(k => {
-      if (found[k] && found[k] !== merged[k]) { merged[k] = found[k]; changed = true; }
+      const explicitlyLabeled = Boolean(deterministic[k]);
+      if (found[k] && (!merged[k] || explicitlyLabeled) && found[k] !== merged[k]) {
+        merged[k] = found[k];
+        changed = true;
+      }
     });
-    // เขียนกลับ: โปรไฟล์ล่าสุด + snapshot สมัครครั้งแรก (เก็บค่าแรกของแต่ละช่อง ไม่เขียนทับ)
+    // เขียนกลับ: โปรไฟล์ล่าสุด + snapshot การสมัครที่ผ่าน validation
     const cf = parseCustomFields(contact as any);
     let snapshotChanged = false;
     if (changed) merged.updatedAt = new Date().toISOString();
@@ -242,7 +302,10 @@ export async function captureCustomerInfo(opts: {
         ? { ...cf.registration_snapshot }
         : { capturedAt: now, channel };
       (['fullName', 'phone', 'bankName', 'bankAccount', 'gameUsername'] as const).forEach(k => {
-        if (!snapshot[k] && found[k]) { snapshot[k] = found[k]; snapshotChanged = true; }
+        if (merged[k] && snapshot[k] !== merged[k]) {
+          snapshot[k] = merged[k];
+          snapshotChanged = true;
+        }
       });
       if (!cf.registration_snapshot) snapshotChanged = true;
       if (!snapshot.channel && channel) { snapshot.channel = channel; snapshotChanged = true; }
@@ -252,7 +315,7 @@ export async function captureCustomerInfo(opts: {
       }
       cf.registration_snapshot = snapshot;
     }
-    if (!changed && !snapshotChanged) return existing;
+    if (!changed && !snapshotChanged) return null;
 
     const data: any = { customFields: JSON.stringify(cf) };
     if (merged.phone) data.phone = merged.phone;
