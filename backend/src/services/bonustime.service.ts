@@ -233,11 +233,8 @@ export async function buildBonusTimeWhatsAppResult(opts: {
   if (!config?.isActive || (!force && !isTriggered)) return null;
 
   const camps = await prisma.bonusTimeCamp.findMany({
-    where: {
-      tenantId,
-      isActive: true,
-      OR: [{ companyId }, { companyId: null }],
-    },
+    // BONUS TIME เดิมใช้คลังเกมร่วมกันภายใน tenant; config เท่านั้นที่แยกบริษัท
+    where: { tenantId, isActive: true },
     select: { id: true, name: true },
     orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
   });
@@ -249,7 +246,6 @@ export async function buildBonusTimeWhatsAppResult(opts: {
       tenantId,
       isActive: true,
       campId: { in: camps.map(camp => camp.id) },
-      OR: [{ companyId }, { companyId: null }],
     },
     orderBy: [{ winRate: 'desc' }, { order: 'asc' }, { createdAt: 'asc' }],
     take: 5,
