@@ -1332,7 +1332,7 @@ export default function InboxPage() {
       {/* ═══ RIGHT: AI Smart Admin Panel ════════════════════════════════════ */}
       {activeConv && (
         <>
-          <div className={`${styles.aiPanelBackdrop} ${aiPanelOpen ? styles.aiPanelOpen : ''}`} onClick={() => setAiPanelOpen(false)} />
+          {aiPanelOpen && <div className={styles.aiPanelBackdrop} onClick={() => setAiPanelOpen(false)} />}
           <div className={`${styles.aiPanel} ${aiPanelOpen ? styles.aiPanelOpen : ''}`}>
             <div className={styles.aiPanelHandle} onClick={() => setAiPanelOpen(false)} />
             <button className={styles.aiPanelClose} onClick={() => setAiPanelOpen(false)}>✕</button>
