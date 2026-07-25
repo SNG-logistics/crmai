@@ -1,0 +1,15 @@
+=== commit AI resilience + self-test === 
+warning: in the working copy of 'backend/src/index.ts', LF will be replaced by CRLF the next time Git touches it
+[main da7ec47] fix(ai): model fallback so bot always answers (not generic 'received'); ai.log + startup self-test to diagnose empty/failed replies
+ 2 files changed, 63 insertions(+), 14 deletions(-)
+=== pull --rebase === 
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Current branch main is up to date.
+=== push === 
+To https://github.com/SNG-logistics/crmai.git
+   61b9f76..da7ec47  main -> main
+da7ec47 fix(ai): model fallback so bot always answers (not generic 'received'); ai.log + startup self-test to diagnose empty/failed replies
+61b9f76 feat(bot): route all 'game breaking / which game' questions to BONUS TIME box; remove hardcoded game-list reply
+8a94d3a fix(bot): bonustime always answers (fuzzy match + tenant fallback + no-silence), links sent as plain URL once (strip markdown), deterministic BONUSTIME pre-check, longer memory
+=== END === 

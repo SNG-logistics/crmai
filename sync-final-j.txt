@@ -1,0 +1,11 @@
+=== commit signature fallback === 
+[main c0a1e60] fix(line): try all tenant LINE configs on signature mismatch - multi-OA tenants were silently dropping webhooks (chats missing from CRM, bot never replied)
+ 1 file changed, 26 insertions(+), 4 deletions(-)
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Current branch main is up to date.
+To https://github.com/SNG-logistics/crmai.git
+   407a05f..c0a1e60  main -> main
+c0a1e60 fix(line): try all tenant LINE configs on signature mismatch - multi-OA tenants were silently dropping webhooks (chats missing from CRM, bot never replied)
+407a05f fix(bonustime): never emit empty text components (empty intro/title/subtitle/footer broke whole LINE flex - the real reason menu never showed); fallbacks + omit empties
+=== END === 

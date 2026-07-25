@@ -481,6 +481,8 @@ export default function InboxPage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeConvRef = useRef<string | null>(null);
   const typingTimeout = useRef<NodeJS.Timeout | undefined>(undefined);
+  // ─── Mobile drawer ─────────────────────────────────────────────────────
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   // ─── Load conversations ───────────────────────────────────────────────────
   const loadConversations = useCallback(async () => {
@@ -562,6 +564,7 @@ export default function InboxPage() {
   const selectConversation = useCallback((conv: Conversation) => {
     if (activeConvRef.current) getSocket()?.emit('leave:conversation', activeConvRef.current);
     setActiveConv(conv);
+    setDrawerOpen(false); // ปิด drawer บนมือถือหลังเลือกห้อง
     setMessages([]);
     setAiSuggest('');
     setEnchant(null);
@@ -841,7 +844,8 @@ export default function InboxPage() {
   return (
     <div className={styles.inbox}>
       {/* ═══ LEFT: Conversation List ═══════════════════════════════════════ */}
-      <div className={styles.convList}>
+      <div className={`${styles.convList} ${drawerOpen ? styles.convListOpen : ''}`}>
+        <button className={styles.drawerClose} onClick={() => setDrawerOpen(false)} aria-label="ปิดรายชื่อ">✕</button>
         <div className={styles.convListHeader}>
           <div style={{ position: 'relative', marginBottom: 8 }}>
             <input className="input" placeholder="🔍 ค้นหา..." value={search}
@@ -952,6 +956,7 @@ export default function InboxPage() {
           <>
             {/* Chat Header */}
             <div className={styles.chatHeader}>
+              <button className={styles.mobileToggle} onClick={() => setDrawerOpen(true)} aria-label="เปิดรายชื่อ">☰</button>
               <div style={{ position: 'relative', flexShrink: 0 }}>
                 <div className="avatar">{activeConv.contact?.displayName?.[0] || '?'}</div>
                 <div style={{ position: 'absolute', bottom: -1, right: -1, width: 10, height: 10, borderRadius: '50%', background: channelColor(activeConv.channel), border: '2px solid var(--bg-secondary)' }} />

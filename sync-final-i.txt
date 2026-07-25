@@ -1,0 +1,13 @@
+=== commit bonustime empty-text fix === 
+[main 407a05f] fix(bonustime): never emit empty text components (empty intro/title/subtitle/footer broke whole LINE flex - the real reason menu never showed); fallbacks + omit empties
+ 1 file changed, 32 insertions(+), 17 deletions(-)
+=== pull --rebase === 
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Current branch main is up to date.
+=== push === 
+To https://github.com/SNG-logistics/crmai.git
+   87b4964..407a05f  main -> main
+407a05f fix(bonustime): never emit empty text components (empty intro/title/subtitle/footer broke whole LINE flex - the real reason menu never showed); fallbacks + omit empties
+87b4964 revert(ui): remove Light mode; fix(infra): add vrc2.cc to Caddyfile so git pull never drops it again
+=== END === 

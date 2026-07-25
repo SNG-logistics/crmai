@@ -264,11 +264,21 @@ export async function processBotMessage(
 
   // ─ Smart KB matching ─
   const allKb = botConfig?.knowledgeBase || [];
-  const relevantKb = allKb
+  // ─── Knowledge Base — คะแนนต่ำเพื่อให้แมตช์ง่าย (ไทย/ลาว)
+  const scored = allKb
     .map(kb => ({ ...kb, score: scoreKB(kb, userMessage) }))
-    .filter(kb => kb.score >= 2)          // ตัด noise ที่คล้ายเล็กน้อย เก็บเฉพาะที่เกี่ยวจริง
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
+    .sort((a, b) => b.score - a.score);
+  // ส่ง 5 อันดับแรกเสมอถ้าเมตช์อะไรได้บ้าง (> 0) — ปล่อยให้ AI ตัดสินว่าตรงหรือไม่
+  const relevantKb = scored.filter(kb => kb.score > 0).slice(0, 5);
+  // ถ้าไม่มีอะไรตรงเลยแต่มี KB อยู่ ส่ง 2 อันดับบนสุดให้ AI ดู (กันพลาด)
+  if (relevantKb.length === 0 && scored.length > 0) {
+    relevantKb.push(...scored.slice(0, 2));
+  }
+  // log debug ให้รู้ว่า KB ถูก match หรือไม่
+  if (allKb.length > 0) {
+    const top = scored.slice(0, 3).map(k => `${k.question.slice(0, 40)} (score:${k.score.toFixed(1)})`).join(', ');
+    logAI(`KB_MATCH user="${userMessage.slice(0, 50)}" top=[${top}] selected=${relevantKb.length}`);
+  }
   const topKnowledge = relevantKb[0];
   const matchedVisual = topKnowledge
     && topKnowledge.sourceType === 'visual'

@@ -1,0 +1,12 @@
+=== commit shared bonustime + company checklist === 
+warning: in the working copy of 'backend/src/routes/bonustime.ts', LF will be replaced by CRLF the next time Git touches it
+[main bf5512a] feat(bonustime): shared camps/games across all companies (add games once); company checklist to tick which OAs use it; unconnected OA sends nothing (no databet fallback)
+ 3 files changed, 73 insertions(+), 50 deletions(-)
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Current branch main is up to date.
+To https://github.com/SNG-logistics/crmai.git
+   26b0dbe..bf5512a  main -> main
+bf5512a feat(bonustime): shared camps/games across all companies (add games once); company checklist to tick which OAs use it; unconnected OA sends nothing (no databet fallback)
+26b0dbe fix(bonustime): strict per-company separation - conversation follows the OA customer messaged (same LINE userId across OAs was stuck on old company); no cross-company fallback; on/off only via company dropdown
+=== END === 

@@ -1,0 +1,11 @@
+=== commit strict per-company bonustime === 
+[main 26b0dbe] fix(bonustime): strict per-company separation - conversation follows the OA customer messaged (same LINE userId across OAs was stuck on old company); no cross-company fallback; on/off only via company dropdown
+ 1 file changed, 35 insertions(+), 55 deletions(-)
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Current branch main is up to date.
+To https://github.com/SNG-logistics/crmai.git
+   8d8d8da..26b0dbe  main -> main
+26b0dbe fix(bonustime): strict per-company separation - conversation follows the OA customer messaged (same LINE userId across OAs was stuck on old company); no cross-company fallback; on/off only via company dropdown
+8d8d8da feat(bonustime): company dropdown selector - pick which company's BONUS TIME to configure/enable; respect per-company on/off in webhook; clean leftover merge markers
+=== END === 

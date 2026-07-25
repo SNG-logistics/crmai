@@ -1,0 +1,13 @@
+=== commit gif-logo fix === 
+[main 829c021] fix(bonustime): skip non-PNG/JPEG camp logos (.gif broke whole LINE flex -> menu never showed); fall back to text initials
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+=== pull --rebase === 
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Current branch main is up to date.
+=== push === 
+To https://github.com/SNG-logistics/crmai.git
+   da7ec47..829c021  main -> main
+829c021 fix(bonustime): skip non-PNG/JPEG camp logos (.gif broke whole LINE flex -> menu never showed); fall back to text initials
+da7ec47 fix(ai): model fallback so bot always answers (not generic 'received'); ai.log + startup self-test to diagnose empty/failed replies
+=== END === 

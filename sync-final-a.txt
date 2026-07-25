@@ -1,0 +1,15 @@
+=== clean === 
+?? sync2.bat
+=== pull --rebase === 
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Rebasing (1/2)Auto-merging backend/src/services/ai.service.ts
+CONFLICT (content): Merge conflict in backend/src/services/ai.service.ts
+error: could not apply 9d10ace... fix(bot): bonustime always answers + plain single link + smarter AI
+hint: Resolve all conflicts manually, mark them as resolved with
+hint: "git add/rm <conflicted_files>", then run "git rebase --continue".
+hint: You can instead skip this commit: run "git rebase --skip".
+hint: To abort and get back to the state before "git rebase", run "git rebase --abort".
+hint: Disable this message with "git config set advice.mergeConflict false"
+Could not apply 9d10ace... # fix(bot): bonustime always answers + plain single link + smarter AI
+REBASE_FAILED_ABORTING 

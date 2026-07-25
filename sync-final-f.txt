@@ -1,0 +1,13 @@
+=== commit AI learning === 
+[main 6da0e9d] feat(ai): learn from real admin replies - retrieve similar past customer/agent Q&A and inject as few-shot examples so bot answers on-point like the team
+ 1 file changed, 76 insertions(+), 1 deletion(-)
+=== pull --rebase === 
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Current branch main is up to date.
+=== push === 
+To https://github.com/SNG-logistics/crmai.git
+   829c021..6da0e9d  main -> main
+6da0e9d feat(ai): learn from real admin replies - retrieve similar past customer/agent Q&A and inject as few-shot examples so bot answers on-point like the team
+829c021 fix(bonustime): skip non-PNG/JPEG camp logos (.gif broke whole LINE flex -> menu never showed); fall back to text initials
+=== END === 

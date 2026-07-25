@@ -1,0 +1,16 @@
+=== commit light/dark theme === 
+warning: in the working copy of 'frontend/app/(dashboard)/layout.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/app/globals.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/app/layout.tsx', LF will be replaced by CRLF the next time Git touches it
+[main 8956122] feat(ui): system-wide Light/Dark theme toggle (CSS variable overrides + topbar switch + no-flash script)
+ 3 files changed, 53 insertions(+)
+=== pull --rebase === 
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Current branch main is up to date.
+=== push === 
+To https://github.com/SNG-logistics/crmai.git
+   6da0e9d..8956122  main -> main
+8956122 feat(ui): system-wide Light/Dark theme toggle (CSS variable overrides + topbar switch + no-flash script)
+6da0e9d feat(ai): learn from real admin replies - retrieve similar past customer/agent Q&A and inject as few-shot examples so bot answers on-point like the team
+=== END === 

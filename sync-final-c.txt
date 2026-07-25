@@ -1,0 +1,14 @@
+=== commit line.ts (hot-games - box) === 
+[main 61b9f76] feat(bot): route all 'game breaking / which game' questions to BONUS TIME box; remove hardcoded game-list reply
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+=== pull --rebase === 
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Current branch main is up to date.
+=== push === 
+To https://github.com/SNG-logistics/crmai.git
+   8a94d3a..61b9f76  main -> main
+61b9f76 feat(bot): route all 'game breaking / which game' questions to BONUS TIME box; remove hardcoded game-list reply
+8a94d3a fix(bot): bonustime always answers (fuzzy match + tenant fallback + no-silence), links sent as plain URL once (strip markdown), deterministic BONUSTIME pre-check, longer memory
+5273730 fix: resolve Prisma unique constraint conflicts and compile errors across routes
+=== END === 

@@ -1,0 +1,11 @@
+=== commit company selector === 
+[main 8d8d8da] feat(bonustime): company dropdown selector - pick which company's BONUS TIME to configure/enable; respect per-company on/off in webhook; clean leftover merge markers
+ 2 files changed, 73 insertions(+), 19 deletions(-)
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Current branch main is up to date.
+To https://github.com/SNG-logistics/crmai.git
+   c0a1e60..8d8d8da  main -> main
+8d8d8da feat(bonustime): company dropdown selector - pick which company's BONUS TIME to configure/enable; respect per-company on/off in webhook; clean leftover merge markers
+c0a1e60 fix(line): try all tenant LINE configs on signature mismatch - multi-OA tenants were silently dropping webhooks (chats missing from CRM, bot never replied)
+=== END === 

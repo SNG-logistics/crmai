@@ -1,0 +1,16 @@
+=== commit remove light mode + add vrc2.cc to Caddyfile === 
+warning: in the working copy of 'frontend/app/(dashboard)/layout.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/app/globals.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'frontend/app/layout.tsx', LF will be replaced by CRLF the next time Git touches it
+[main 87b4964] revert(ui): remove Light mode; fix(infra): add vrc2.cc to Caddyfile so git pull never drops it again
+ 4 files changed, 8 insertions(+), 57 deletions(-)
+=== pull --rebase === 
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Current branch main is up to date.
+=== push === 
+To https://github.com/SNG-logistics/crmai.git
+   8956122..87b4964  main -> main
+87b4964 revert(ui): remove Light mode; fix(infra): add vrc2.cc to Caddyfile so git pull never drops it again
+8956122 feat(ui): system-wide Light/Dark theme toggle (CSS variable overrides + topbar switch + no-flash script)
+=== END === 

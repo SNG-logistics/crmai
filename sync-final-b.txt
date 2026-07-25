@@ -1,0 +1,15 @@
+=== reset to origin/main === 
+HEAD is now at 5273730 fix: resolve Prisma unique constraint conflicts and compile errors across routes
+=== overlay my 3 fixed files from 600329c === 
+[main 8a94d3a] fix(bot): bonustime always answers (fuzzy match + tenant fallback + no-silence), links sent as plain URL once (strip markdown), deterministic BONUSTIME pre-check, longer memory
+ 3 files changed, 122 insertions(+), 25 deletions(-)
+=== push === 
+To https://github.com/SNG-logistics/crmai.git
+   5273730..8a94d3a  main -> main
+=== log === 
+8a94d3a fix(bot): bonustime always answers (fuzzy match + tenant fallback + no-silence), links sent as plain URL once (strip markdown), deterministic BONUSTIME pre-check, longer memory
+5273730 fix: resolve Prisma unique constraint conflicts and compile errors across routes
+6505486 feat: BonusTime camp dropdown selector + slot bot + various updates
+38416fc fix(bonustime): paginate camps into a carousel so many camps do not exceed LINE flex limit (menu was silently failing -> AI text fallback)
+d7c3802 build: ignore type/lint errors during next build so production build always completes
+=== END === 

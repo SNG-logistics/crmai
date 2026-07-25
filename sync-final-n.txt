@@ -1,0 +1,11 @@
+=== commit deterministic OA routing === 
+[main a9ed84a] fix(line): deterministic OA routing - prefer the config that has a company when secrets collide (orphan no-company config was hijacking OneToBet chats into databet)
+ 1 file changed, 42 insertions(+), 41 deletions(-)
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Current branch main is up to date.
+To https://github.com/SNG-logistics/crmai.git
+   bf5512a..a9ed84a  main -> main
+a9ed84a fix(line): deterministic OA routing - prefer the config that has a company when secrets collide (orphan no-company config was hijacking OneToBet chats into databet)
+bf5512a feat(bonustime): shared camps/games across all companies (add games once); company checklist to tick which OAs use it; unconnected OA sends nothing (no databet fallback)
+=== END === 
