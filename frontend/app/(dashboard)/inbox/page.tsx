@@ -359,7 +359,7 @@ function MessageBubble({ msg, contactName, channel }: { msg: Message; contactNam
               onError={handleImgError}
               style={{ maxWidth: 240, maxHeight: 200, borderRadius: 8, cursor: 'zoom-in', objectFit: 'cover', display: 'block' }}
             />
-            {meta?.aiKnowledgeImage && msg.content && (
+            {(meta?.aiKnowledgeImage || meta?.bonusTimeImage) && msg.content && (
               <div style={{ marginTop: 7, whiteSpace: 'pre-wrap', fontSize: '0.82rem', lineHeight: 1.55 }}>
                 {msg.content}
               </div>

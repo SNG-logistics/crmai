@@ -56,7 +56,17 @@ function titleCase(s: string): string {
   return s.split(' ').map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w)).join(' ');
 }
 
+// บางค่ายใช้รหัสภายในเป็นชื่อไฟล์ จึงต้อง map จากภาพที่ตรวจชื่อแล้ว
+// เพื่อไม่ให้หน้าร้านและข้อความแนะนำแสดงรหัสอย่าง "22019" แทนชื่อเกมจริง
+const VERIFIED_GAME_NAMES: Record<string, string> = {
+  'fachai/22019': 'Panda Dragon Boat',
+  'slotxo/3fx69pizs144w': 'Lucky Streak',
+  'cq9/131': 'Fa Cai Shen',
+};
+
 function gameName(code: string, stem: string): string {
+  const verifiedName = VERIFIED_GAME_NAMES[`${code.toLowerCase()}/${stem.toLowerCase()}`];
+  if (verifiedName) return verifiedName;
   switch (code) {
     case 'jili': {
       // 001_276_1020_276_FortuneGaruda500 | 006_4_GameID_32_EN | 116_85_en

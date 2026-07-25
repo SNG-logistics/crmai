@@ -46,6 +46,25 @@ export interface BTGame {
   link?: string | null;
 }
 
+export interface BonusTimeWhatsAppResult {
+  reply: string;
+  imageUrl?: string;
+  gameId?: string;
+  gameRank?: number;
+  gameName?: string;
+  campName?: string;
+  winRate?: number;
+  freeSpinRate?: number;
+  wildRate?: number;
+}
+
+export interface BonusTimeWhatsAppSelection {
+  gameId?: string;
+  winRate?: number;
+  freeSpinRate?: number;
+  wildRate?: number;
+}
+
 // ─── คีย์เวิร์ด default (fast-path ไม่เปลืองโทเคน AI) ─────────────────────────
 export const DEFAULT_BONUS_KEYWORDS = [
   'bonustime', 'bonus time', 'bonus tim', 'bonustim', 'bunustime', 'bonut time', 'โบนัสไทม์',
@@ -116,22 +135,109 @@ export function matchBonusTimeKeyword(text: string, config?: Pick<BTConfig, 'key
 }
 
 /**
- * WhatsApp ไม่มี Flex/postback แบบ LINE จึงสรุปข้อมูลชุดเดียวกันจาก BONUSTIME
- * เป็นข้อความ โดยเลือกเกม active ที่มี win rate สูงสุดในขณะตอบ
+ * อ่านอันดับเกมจากคำถามต่อเนื่อง เช่น "ขอรูปเกมที่ 2" หรือ
+ * "ເກມທີ່ໜຶ່ງ ສົ່ງຮູບໃຫ້ເບິ່ງແນ່".
+ * คืนค่าเป็นอันดับแบบ 1-based และจำกัดไว้ที่รายการแนะนำ 5 เกม
  */
-export async function buildBonusTimeWhatsAppReply(opts: {
+export function parseBonusTimeGameRank(text: string): number | null {
+  const digitMap: Record<string, string> = {
+    '๑': '1', '๒': '2', '๓': '3', '๔': '4', '๕': '5',
+    '໑': '1', '໒': '2', '໓': '3', '໔': '4', '໕': '5',
+  };
+  const raw = (text || '')
+    .toLowerCase()
+    .replace(/เกมส์/g, 'เกม')
+    .replace(/[๑๒๓๔๕໑໒໓໔໕]/g, digit => digitMap[digit] || digit);
+  if (!/(เกม|ເກມ)/i.test(raw)) return null;
+
+  const compact = normalizeBT(raw);
+  const numeric = compact.match(
+    /(?:เกม|ເກມ)(?:(?:อันดับ|ลำดับ)?ที|อันดับ|ลำดับ|เบอร์|อัน|(?:ອັນດັບ|ລຳດັບ)?ທີ່?|ອັນດັບ|ລຳດັບ|ເບີ|ອັນ)?([1-5])/i,
+  );
+  if (numeric) return Number(numeric[1]);
+
+  const ordinalTokens: Array<[number, string[]]> = [
+    [1, [
+      'เกมแรก', 'เกมทีหนึ่ง', 'เกมอันดับหนึ่ง', 'เกมลำดับหนึ่ง',
+      'ເກມທຳອິດ', 'ເກມອັນທຳອິດ', 'ເກມທີ່ໜຶ່ງ', 'ເກມທີໜຶ່ງ',
+    ]],
+    [2, [
+      'เกมทีสอง', 'เกมอันดับสอง', 'เกมลำดับสอง',
+      'ເກມທີ່ສອງ', 'ເກມທີສອງ', 'ເກມອັນທີສອງ',
+    ]],
+    [3, [
+      'เกมทีสาม', 'เกมอันดับสาม', 'เกมลำดับสาม',
+      'ເກມທີ່ສາມ', 'ເກມທີສາມ', 'ເກມອັນທີສາມ',
+    ]],
+    [4, [
+      'เกมทีสี', 'เกมอันดับสี', 'เกมลำดับสี',
+      'ເກມທີ່ສີ່', 'ເກມທີສີ່', 'ເກມອັນທີສີ່',
+    ]],
+    [5, [
+      'เกมทีห้า', 'เกมอันดับห้า', 'เกมลำดับห้า',
+      'ເກມທີ່ຫ້າ', 'ເກມທີຫ້າ', 'ເກມອັນທີຫ້າ',
+    ]],
+  ];
+  for (const [rank, tokens] of ordinalTokens) {
+    if (tokens.some(token => compact.includes(normalizeBT(token)))) return rank;
+  }
+  return null;
+}
+
+function isBonusTimeImageFollowUp(text: string): boolean {
+  const t = (text || '').toLowerCase();
+  return /(เกม|ເກມ)/i.test(t) && /(รูป|ภาพ|ส่งรูป|ຮູບ|ສົ່ງຮູບ|ເບິ່ງຮູບ)/i.test(t);
+}
+
+const VERIFIED_GAME_NAMES_BY_IMAGE: Array<[string, string]> = [
+  ['/uploads/games/fachai/22019.png', 'Panda Dragon Boat'],
+  ['/uploads/games/slotxo/3fx69pizs144w.png', 'Lucky Streak'],
+  ['/uploads/games/cq9/131.png', 'Fa Cai Shen'],
+];
+
+function verifiedGameDisplayName(game: { name: string; image?: string | null }): string {
+  const imagePath = String(game.image || '').toLowerCase().split(/[?#]/, 1)[0];
+  const verified = VERIFIED_GAME_NAMES_BY_IMAGE.find(([suffix]) => imagePath.endsWith(suffix));
+  return verified?.[1] || game.name;
+}
+
+/**
+ * WhatsApp ไม่มี Flex/postback แบบ LINE จึงสรุปข้อมูลชุดเดียวกันจาก BONUSTIME
+ * เป็นรูปเกมพร้อมชื่อค่ายและเปอร์เซ็นต์ โดยเลือกเกม active ที่มี win rate
+ * สูงสุดในขณะตอบ และรองรับการถามต่อด้วยอันดับ 1-5
+ */
+export async function buildBonusTimeWhatsAppResult(opts: {
   tenantId: string;
   companyId: string;
   userMessage: string;
   language?: 'th' | 'lo';
   force?: boolean;
-}): Promise<string | null> {
-  const { tenantId, companyId, userMessage, language = 'th', force = false } = opts;
+  allowImageFollowUp?: boolean;
+  previousSelection?: BonusTimeWhatsAppSelection;
+}): Promise<BonusTimeWhatsAppResult | null> {
+  const {
+    tenantId,
+    companyId,
+    userMessage,
+    language = 'th',
+    force = false,
+    allowImageFollowUp = false,
+    previousSelection,
+  } = opts;
   const config = await prisma.bonusTimeConfig.findUnique({ where: { companyId } }).catch(() => null);
-  if (!config?.isActive || (!force && !matchBonusTimeKeyword(userMessage, config))) return null;
+  const requestedRank = parseBonusTimeGameRank(userMessage);
+  const imageFollowUp = isBonusTimeImageFollowUp(userMessage);
+  const isTriggered = matchBonusTimeKeyword(userMessage, config)
+    || requestedRank !== null
+    || (allowImageFollowUp && imageFollowUp);
+  if (!config?.isActive || (!force && !isTriggered)) return null;
 
   const camps = await prisma.bonusTimeCamp.findMany({
-    where: { tenantId, isActive: true },
+    where: {
+      tenantId,
+      isActive: true,
+      OR: [{ companyId }, { companyId: null }],
+    },
     select: { id: true, name: true },
     orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
   });
@@ -139,34 +245,98 @@ export async function buildBonusTimeWhatsAppReply(opts: {
 
   const campNames = new Map(camps.map(camp => [camp.id, camp.name]));
   const games = await prisma.bonusTimeGame.findMany({
-    where: { tenantId, isActive: true, campId: { in: camps.map(camp => camp.id) } },
+    where: {
+      tenantId,
+      isActive: true,
+      campId: { in: camps.map(camp => camp.id) },
+      OR: [{ companyId }, { companyId: null }],
+    },
     orderBy: [{ winRate: 'desc' }, { order: 'asc' }, { createdAt: 'asc' }],
     take: 5,
   });
 
   const title = (config.headerTitle || '').trim() || '⚡ BONUS TIME ⚡';
-  const intro = (config.gamesIntro || config.intro || '').trim();
-  const footer = (config.footerNote || '').trim();
+  const configuredFooter = (config.footerNote || '').trim();
+  const footer = language === 'lo' && (
+    !configuredFooter
+    || configuredFooter === '* อัตราอ้างอิงจากสถิติระบบ ไม่ใช่การรับประกันผล'
+  )
+    ? '* ອັດຕາອ້າງອີງຈາກສະຖິຕິລະບົບ ບໍ່ແມ່ນການຮັບປະກັນຜົນ'
+    : configuredFooter;
   if (!games.length) {
     const campList = camps.slice(0, 12).map((camp, index) => `${index + 1}. ${camp.name}`).join('\n');
-    return language === 'lo'
-      ? `${title}\n${intro || 'ຄ່າຍເກມທີ່ເປີດໃຊ້ງານຕອນນີ້'}\n\n${campList}${footer ? `\n\n${footer}` : ''}`
-      : `${title}\n${intro || 'ค่ายเกมที่เปิดใช้งานตอนนี้'}\n\n${campList}${footer ? `\n\n${footer}` : ''}`;
+    return {
+      reply: language === 'lo'
+        ? `${title}\nຄ່າຍເກມທີ່ເປີດໃຊ້ງານຕອນນີ້\n\n${campList}${footer ? `\n\n${footer}` : ''}`
+        : `${title}\nค่ายเกมที่เปิดใช้งานตอนนี้\n\n${campList}${footer ? `\n\n${footer}` : ''}`,
+    };
   }
 
-  const rows = games.map((game, index) => {
-    const win = jitter(game.winRate, config.liveJitter);
-    const freeSpin = jitter(game.freeSpinRate, config.liveJitter);
-    const wild = jitter(game.wildRate, config.liveJitter);
-    const camp = campNames.get(game.campId) || game.provider || '';
-    const stats = language === 'lo'
-      ? `ອັດຕາຊະນະ ${win}% | ຟຣີສະປິນ ${freeSpin}% | WILD ${wild}%`
-      : `อัตราชนะ ${win}% | ฟรีสปิน ${freeSpin}% | WILD ${wild}%`;
-    return `${index + 1}. 🔥 ${game.name}${camp ? ` (${camp})` : ''}\n   ${stats}${game.link ? `\n   ${game.link}` : ''}`;
-  }).join('\n\n');
+  const rank = requestedRank || 1;
+  const game = games[rank - 1] || games[0];
+  const actualRank = games[rank - 1] ? rank : 1;
+  const gameName = verifiedGameDisplayName(game);
+  const previousRate = (value?: number): number | undefined => (
+    Number.isInteger(value) && Number(value) >= 1 && Number(value) <= 99 ? Number(value) : undefined
+  );
+  const reusePrevious = previousSelection?.gameId === game.id;
+  const win = reusePrevious
+    ? previousRate(previousSelection.winRate) ?? jitter(game.winRate, config.liveJitter)
+    : jitter(game.winRate, config.liveJitter);
+  const freeSpin = reusePrevious
+    ? previousRate(previousSelection.freeSpinRate) ?? jitter(game.freeSpinRate, config.liveJitter)
+    : jitter(game.freeSpinRate, config.liveJitter);
+  const wild = reusePrevious
+    ? previousRate(previousSelection.wildRate) ?? jitter(game.wildRate, config.liveJitter)
+    : jitter(game.wildRate, config.liveJitter);
+  const camp = campNames.get(game.campId) || game.provider || '';
+  const imageUrl = String(game.banner || game.image || '').trim() || undefined;
 
-  const heading = language === 'lo' ? 'ເກມທີ່ຄ່າສະຖິຕິສູງຕອນນີ້' : 'เกมที่ค่าสถิติสูงตอนนี้';
-  return `${title}\n${intro ? `${intro}\n` : ''}${heading}\n\n${rows}${footer ? `\n\n${footer}` : ''}`;
+  const reply = language === 'lo'
+    ? [
+        title,
+        `🎮 ເກມແນະນຳອັນດັບ ${actualRank}: ${gameName}`,
+        `🏢 ຄ່າຍ: ${camp || '-'}`,
+        `📊 ອັດຕາຊະນະ: ${win}%`,
+        `🎁 ໂອກາດຟຣີສະປິນ: ${freeSpin}%`,
+        `🃏 WILD: ${wild}%`,
+        ...(footer ? ['', footer] : []),
+      ].join('\n')
+    : [
+        title,
+        `🎮 เกมแนะนำอันดับ ${actualRank}: ${gameName}`,
+        `🏢 ค่าย: ${camp || '-'}`,
+        `📊 อัตราชนะ: ${win}%`,
+        `🎁 โอกาสเข้าฟรีสปิน: ${freeSpin}%`,
+        `🃏 WILD: ${wild}%`,
+        ...(footer ? ['', footer] : []),
+      ].join('\n');
+
+  return {
+    reply,
+    imageUrl,
+    gameId: game.id,
+    gameRank: actualRank,
+    gameName,
+    campName: camp || undefined,
+    winRate: win,
+    freeSpinRate: freeSpin,
+    wildRate: wild,
+  };
+}
+
+/** Backward-compatible text-only helper for existing callers/tests. */
+export async function buildBonusTimeWhatsAppReply(opts: {
+  tenantId: string;
+  companyId: string;
+  userMessage: string;
+  language?: 'th' | 'lo';
+  force?: boolean;
+  allowImageFollowUp?: boolean;
+  previousSelection?: BonusTimeWhatsAppSelection;
+}): Promise<string | null> {
+  const result = await buildBonusTimeWhatsAppResult(opts);
+  return result?.reply || null;
 }
 
 // ─── LUX gold palette (LINE flex — โทนทองหรู) ────────────────────────────────

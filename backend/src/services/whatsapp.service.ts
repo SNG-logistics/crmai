@@ -30,7 +30,10 @@ import {
   normalizeCustomerPhone,
   readProfile,
 } from './contact-memory.service';
-import { buildBonusTimeWhatsAppReply } from './bonustime.service';
+import {
+  BonusTimeWhatsAppResult,
+  buildBonusTimeWhatsAppResult,
+} from './bonustime.service';
 import { verifySlip } from './slip-verify.service';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -135,12 +138,62 @@ function isDepositNotCredited(text: string): boolean {
   return /ฝาก.{0,12}(ไม่เข้า|ยังไม่เข้า|หาย|ไม่มา)|โอน.{0,12}(ไม่เข้า|ยังไม่เข้า)|ยอด.{0,8}(ไม่เข้า|ยังไม่เข้า)|ຝາກ.{0,12}(ບໍ່ເຂົ້າ|ຍັງບໍ່ເຂົ້າ)|ໂອນ.{0,12}(ບໍ່ເຂົ້າ|ຍັງບໍ່ເຂົ້າ)/i.test(text || '');
 }
 
-function resolveKnowledgeImageFile(imageUrl?: string): string | undefined {
-  if (!imageUrl?.startsWith('/uploads/knowledge/')) return undefined;
-  const knowledgeRoot = path.resolve(process.cwd(), 'uploads', 'knowledge');
-  const filePath = path.resolve(process.cwd(), imageUrl.replace(/^\/+/, ''));
-  if (!filePath.startsWith(knowledgeRoot + path.sep) || !fs.existsSync(filePath)) return undefined;
-  return filePath;
+function allowedRemoteImageHosts(): Set<string> {
+  const hosts = new Set(['khodtuengai.com', 'www.khodtuengai.com']);
+  const configured = [
+    process.env.PUBLIC_BASE_URL,
+    ...(process.env.WHATSAPP_IMAGE_HOSTS || '').split(','),
+  ];
+  for (const value of configured) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) continue;
+    try {
+      const url = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+      if (url.hostname) hosts.add(url.hostname.toLowerCase());
+    } catch {
+      // ค่า env ที่ไม่ใช่ URL/hostname จะถูกข้ามอย่างปลอดภัย
+    }
+  }
+  return hosts;
+}
+
+/**
+ * Baileys รับได้ทั้ง HTTPS URL และ absolute local path.
+ * อนุญาต local file เฉพาะใต้ uploads และ URL เฉพาะ host ที่ระบบตั้งไว้
+ * เพื่อไม่ให้ค่ารูปในฐานข้อมูลพาเซิร์ฟเวอร์ไปอ่านไฟล์/เรียก private network อื่น
+ */
+export function resolveOutgoingImageSource(imageUrl?: string): string | undefined {
+  const raw = String(imageUrl || '').trim();
+  if (!raw) return undefined;
+
+  if (/^https:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw);
+      if (url.username || url.password) return undefined;
+      if (!allowedRemoteImageHosts().has(url.hostname.toLowerCase())) return undefined;
+      return url.href;
+    } catch {
+      return undefined;
+    }
+  }
+
+  const pathOnly = raw.split(/[?#]/, 1)[0];
+  if (!pathOnly.startsWith('/uploads/')) return undefined;
+  try {
+    const decoded = decodeURIComponent(pathOnly);
+    const uploadsRoot = fs.realpathSync(path.resolve(process.cwd(), 'uploads'));
+    const candidate = path.resolve(process.cwd(), decoded.replace(/^\/+/, ''));
+    if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) return undefined;
+    const realFile = fs.realpathSync(candidate);
+    const relative = path.relative(uploadsRoot, realFile);
+    if (!relative || relative.startsWith(`..${path.sep}`) || relative === '..' || path.isAbsolute(relative)) {
+      return undefined;
+    }
+    if (!/\.(?:jpe?g|png|gif|webp)$/i.test(realFile)) return undefined;
+    return realFile;
+  } catch {
+    return undefined;
+  }
 }
 
 function sessionDir(sessionKey: string): string {
@@ -481,24 +534,43 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
 
     let reply: string;
     let responseFlow: string | undefined;
-    let responseImage: { imageUrl: string; imagePreviewUrl?: string; knowledgeId?: string } | undefined;
+    let bonusTimeResult: BonusTimeWhatsAppResult | null = null;
+    let responseImage: {
+      imageUrl: string;
+      imagePreviewUrl?: string;
+      knowledgeId?: string;
+      source: 'knowledge' | 'bonustime';
+    } | undefined;
     const hasEarlierSlip = isDepositNotCredited(userMessage) && (
       await prisma.slipVerification.count({ where: { conversationId } }) > 0
       || await prisma.message.count({ where: { conversationId, senderType: 'customer', type: 'image' } }) > 0
     );
-    const bonusTimeReply = hasEarlierSlip ? null : await buildBonusTimeWhatsAppReply({
+    bonusTimeResult = hasEarlierSlip ? null : await buildBonusTimeWhatsAppResult({
       tenantId,
       companyId,
       userMessage,
       language,
+      allowImageFollowUp: lastBotMeta.flow === 'bonustime',
+      previousSelection: lastBotMeta.flow === 'bonustime' ? {
+        gameId: lastBotMeta.bonusTimeGameId,
+        winRate: lastBotMeta.winRate,
+        freeSpinRate: lastBotMeta.freeSpinRate,
+        wildRate: lastBotMeta.wildRate,
+      } : undefined,
     });
     if (hasEarlierSlip) {
       reply = language === 'lo'
         ? 'ແອດມິນໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ກຳລັງດຳເນີນການກວດສອບໃຫ້ ລໍຖ້າຈັກຄູ່ເຈົ້າ'
         : 'แอดมินได้รับสลิปแล้วค่ะ กำลังดำเนินการตรวจสอบให้ รอสักครู่นะคะ';
-    } else if (bonusTimeReply) {
-      reply = bonusTimeReply;
+    } else if (bonusTimeResult) {
+      reply = bonusTimeResult.reply;
       responseFlow = 'bonustime';
+      if (bonusTimeResult.imageUrl) {
+        responseImage = {
+          imageUrl: bonusTimeResult.imageUrl,
+          source: 'bonustime',
+        };
+      }
     } else if (registerIntent && !hasCustomerInfo) {
       reply = buildRegisterReply(profile, language);
       responseFlow = missingRegisterFields(profile).length ? 'registration' : 'registration_complete';
@@ -531,16 +603,32 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
           imageUrl: result.imageUrl,
           imagePreviewUrl: result.imagePreviewUrl,
           knowledgeId: result.knowledgeId,
+          source: 'knowledge',
         };
       }
     }
 
-    const imageFile = resolveKnowledgeImageFile(responseImage?.imageUrl);
-    const sentWithImage = imageFile ? await trySend(accountId, jid, reply, imageFile) : false;
-    if (!sentWithImage) await trySend(accountId, jid, reply);
+    const imageSource = resolveOutgoingImageSource(responseImage?.imageUrl);
+    const sentWithImage = imageSource ? await trySend(accountId, jid, reply, imageSource) : false;
+    const sentAsText = sentWithImage ? false : await trySend(accountId, jid, reply);
+    if (!sentWithImage && !sentAsText) {
+      console.warn(`[WA] Bot reply delivery failed account=${accountId} conversation=${conversationId}`);
+      return;
+    }
     const responseMetadata = {
       ...(responseFlow ? { flow: responseFlow } : {}),
-      ...(sentWithImage ? {
+      ...(bonusTimeResult?.gameId ? {
+        bonusTimeGameId: bonusTimeResult.gameId,
+        bonusTimeRank: bonusTimeResult.gameRank,
+        bonusTimeGameName: bonusTimeResult.gameName,
+        bonusTimeCampName: bonusTimeResult.campName,
+        winRate: bonusTimeResult.winRate,
+        freeSpinRate: bonusTimeResult.freeSpinRate,
+        wildRate: bonusTimeResult.wildRate,
+        ...(responseImage?.imageUrl ? { imageUrl: responseImage.imageUrl } : {}),
+        ...(sentWithImage ? { bonusTimeImage: true } : { imageDelivery: 'fallback_text' }),
+      } : {}),
+      ...(sentWithImage && responseImage?.source === 'knowledge' ? {
         imageUrl: responseImage?.imageUrl,
         imagePreviewUrl: responseImage?.imagePreviewUrl,
         knowledgeId: responseImage?.knowledgeId,
