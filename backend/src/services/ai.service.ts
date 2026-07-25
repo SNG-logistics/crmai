@@ -30,6 +30,8 @@ const client = new OpenAI({
 
 const DEFAULT_MODEL = process.env.COMETAPI_MODEL || 'gemini-3.6-flash';
 const LIGHT_MODEL   = process.env.COMETAPI_LIGHT_MODEL || 'gemini-3.6-flash';
+const CHAT_COMPLETION_TOKENS = Math.max(800, Number(process.env.AI_CHAT_MAX_TOKENS) || 1400);
+const RETRY_COMPLETION_TOKENS = Math.max(1200, Number(process.env.AI_RETRY_MAX_TOKENS) || 1800);
 
 // Gemini 3.6 Flash deprecated sampling parameters such as temperature.
 // Omit them for this model so the same OpenAI-compatible gateway works
@@ -181,6 +183,7 @@ function buildSystemRules(s: BotSettings, forcedLanguage?: 'th' | 'lo'): string 
     '- ห้ามตอบโดยทวนหรือคัดลอกข้อความล่าสุดของลูกค้ากลับไป เว้นแต่จำเป็นต้องทวนข้อมูลสั้นๆ เพื่อยืนยัน',
     '- ถ้าแหล่งความรู้ที่อนุญาตไม่มีคำตอบ ให้แจ้งตามตรงว่าต้องให้แอดมินตรวจสอบ ห้ามเดา',
     '- ข้อมูลส่วนตัวและข้อมูลภายในใช้ประกอบการช่วยเหลือเท่านั้น ห้ามเปิดเผยเกินกว่าที่ลูกค้าคนนั้นแจ้งเอง',
+    '- ทุกคำตอบต้องเขียนให้จบประโยคและจบใจความ ห้ามทิ้งคำหรือประโยคค้างกลางทาง',
     '- ⚠️ ห้ามใช้ markdown ทุกชนิด (ห้าม [ข้อความ](ลิงก์), **, `, #) — แชทลูกค้าแสดงข้อความล้วนเท่านั้น',
     '- ถ้าต้องส่งลิงก์ ให้วาง URL เปล่าๆ ครั้งเดียว เช่น https://example.com — ห้ามวงเล็บครอบ ห้ามพิมพ์ลิงก์เดิมซ้ำ',
     s.forbidden ? `- ข้อห้ามเพิ่มเติมจากร้าน: ${s.forbidden}` : '',
@@ -212,24 +215,60 @@ export async function generateAIResponse(
   // ไล่ลอง: โมเดลที่ขอ → โมเดลสำรอง (ไม่ซ้ำ) จนกว่าจะได้คำตอบที่ไม่ว่าง
   const tryModels = [model, ...FALLBACK_MODELS].filter((m, i, a) => m && a.indexOf(m) === i);
   let lastErr: any = null;
+  let truncatedReply = '';
   for (const m of tryModels) {
-    try {
-      const response = await client.chat.completions.create({
-        model: m,
-        messages,
-        ...samplingParams(m, temperature),
-        max_tokens: maxTokens,
-      });
-      const out = response.choices[0]?.message?.content?.trim() || '';
-      if (out) {
-        if (m !== model) logAI(`OK via fallback model=${m} (primary=${model} failed/empty)`);
-        return out;
+    // โมเดล reasoning อาจใช้ token budget เกือบหมดก่อนสร้างข้อความจริง
+    // ถ้า finish_reason=length ต้องทิ้งข้อความที่ขาดแล้วสร้างใหม่ด้วย budget สูงขึ้น
+    const retryBudget = Math.max(maxTokens, RETRY_COMPLETION_TOKENS, Math.min(3200, maxTokens * 2));
+    const budgets = [...new Set([maxTokens, retryBudget])];
+    for (const budget of budgets) {
+      try {
+        const response = await client.chat.completions.create({
+          model: m,
+          messages,
+          ...samplingParams(m, temperature),
+          max_tokens: budget,
+        });
+        const choice = response.choices[0];
+        const out = choice?.message?.content?.trim() || '';
+        const finishReason = String(choice?.finish_reason || '').toLowerCase();
+        const hitTokenLimit = finishReason === 'length' || finishReason === 'max_tokens';
+        const usage: any = response.usage;
+
+        if (finishReason === 'content_filter') {
+          lastErr = new Error(`AI response blocked by content filter (model=${m})`);
+          logAI(`BLOCKED model=${m} finish=${finishReason} chars=${out.length}`);
+          break;
+        }
+        if (hitTokenLimit) {
+          if (out.length > truncatedReply.length) truncatedReply = out;
+          logAI(
+            `TRUNCATED model=${m} finish=${finishReason} budget=${budget}`
+            + ` chars=${out.length} completion=${usage?.completion_tokens ?? '?'}`
+            + ` reasoning=${usage?.completion_tokens_details?.reasoning_tokens ?? '?'}`,
+          );
+          continue;
+        }
+        if (out) {
+          if (m !== model || budget !== maxTokens) {
+            logAI(`OK after retry model=${m} primary=${model} budget=${budget} finish=${finishReason || 'unknown'}`);
+          }
+          return out;
+        }
+        logAI(`EMPTY reply model=${m} finish=${finishReason || 'unknown'} budget=${budget}`);
+        break;
+      } catch (e: any) {
+        lastErr = e;
+        logAI(`ERROR model=${m} status=${e?.status || e?.response?.status} msg=${e?.message || e?.response?.data?.error?.message}`);
+        break;
       }
-      logAI(`EMPTY reply model=${m} finish=${response.choices[0]?.finish_reason}`);
-    } catch (e: any) {
-      lastErr = e;
-      logAI(`ERROR model=${m} status=${e?.status || e?.response?.status} msg=${e?.message || e?.response?.data?.error?.message}`);
     }
+  }
+  // ห้ามส่งข้อความที่รู้แน่ว่าถูกตัดกลางประโยคให้ลูกค้า
+  if (truncatedReply) {
+    const error = new Error('AI response hit the token limit on every available model');
+    logAI(`DISCARDED truncated reply chars=${truncatedReply.length}`);
+    throw error;
   }
   if (lastErr) throw lastErr;   // ทุกโมเดล error → โยนให้ caller จัดการ (จะใช้ smart fallback)
   return '';                    // ทุกโมเดลตอบว่าง (ไม่ error)
@@ -358,7 +397,7 @@ export async function processBotMessage(
       msgs,
       botConfig?.model || LIGHT_MODEL,
       botConfig?.temperature ?? 0.7,
-      300
+      CHAT_COMPLETION_TOKENS
     );
 
     // ตัดโทเคนระบบ + ล้าง markdown/ลิงก์ซ้ำ ก่อนส่งเข้าแชท
@@ -381,7 +420,7 @@ export async function processBotMessage(
         ],
         botConfig?.model || LIGHT_MODEL,
         Math.min(botConfig?.temperature ?? 0.7, 0.4),
-        300,
+        CHAT_COMPLETION_TOKENS,
       );
       isBonusToken = /\[\[BONUSTIME\]\]/i.test(raw);
       cleaned = isBonusToken ? '[[BONUSTIME]]' : sanitizeForChat(raw.replace(/HANDOFF_REQUESTED/gi, ''));
@@ -619,7 +658,7 @@ export async function composeQuickReply(opts: {
   ];
 
   try {
-    const reply = await generateAIResponse(messages, DEFAULT_MODEL, 0.7, 300);
+    const reply = await generateAIResponse(messages, DEFAULT_MODEL, 0.7, CHAT_COMPLETION_TOKENS);
     return reply || content;
   } catch {
     return content; // AI ล่ม → คืนเนื้อหาดิบให้แอดมินแก้เอง
