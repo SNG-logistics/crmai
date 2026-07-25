@@ -135,8 +135,8 @@ export default function WhatsAppSettingsPage() {
     setAiLoading(true);
     try {
       const [b, e] = await Promise.all([
-        api.get('/bot', { params: { companyId: cid } }),
-        api.get('/bot/extended', { params: { companyId: cid } }),
+        api.get('/bot', { params: { companyId: cid, channel: 'whatsapp' } }),
+        api.get('/bot/extended', { params: { companyId: cid, channel: 'whatsapp' } }),
       ]);
       const bot = b.data.bot;
       setAi(bot ? {
@@ -275,9 +275,10 @@ export default function WhatsAppSettingsPage() {
     if (!companyId) return;
     setAiSaving(true);
     try {
-      await api.put('/bot', { companyId, systemPrompt: ai.systemPrompt, model: ai.model, temperature: ai.temperature, isActive: ai.isActive });
+      await api.put('/bot', { companyId, channel: 'whatsapp', systemPrompt: ai.systemPrompt, model: ai.model, temperature: ai.temperature, isActive: ai.isActive });
       await api.put('/bot/extended', {
         companyId,
+        channel: 'whatsapp',
         welcomeMessage: ext.welcomeMessage,
         handoffKeywords: ext.handoffKeywords.split(',').map(s => s.trim()).filter(Boolean),
         whatsappLanguage: ext.whatsappLanguage,
@@ -638,11 +639,11 @@ export default function WhatsAppSettingsPage() {
                 </div>
 
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <KnowledgeFileManager companyId={companyId} companyName={selectedCompany?.name} />
+                  <KnowledgeFileManager companyId={companyId} companyName={selectedCompany?.name} channel="whatsapp" />
                 </div>
 
                 <div style={{ gridColumn: '1 / -1' }}>
-                  <VisualKnowledgeManager companyId={companyId} companyName={selectedCompany?.name} />
+                  <VisualKnowledgeManager companyId={companyId} companyName={selectedCompany?.name} channel="whatsapp" />
                 </div>
               </div>
             )

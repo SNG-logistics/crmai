@@ -251,9 +251,10 @@ export async function processBotMessage(
     return { reply: '[[BONUSTIME]]', shouldHandoff: false };
   }
 
-  // per-company AI: ถ้ามี companyId → โหลด config ของบริษัทนั้น ; ไม่มี → fallback ระดับ tenant
+  // LINE and WhatsApp keep independent settings and knowledge per company.
+  const botChannel = opts?.channel === 'whatsapp' ? 'whatsapp' : 'line';
   const botConfig = await prisma.botConfig.findFirst({
-    where: companyId ? { companyId } : { tenantId },
+    where: companyId ? { companyId, channel: botChannel } : { tenantId, channel: botChannel },
     // เก็บความรู้ได้ไม่จำกัด แต่คัดเฉพาะรายการที่เกี่ยวข้องก่อนส่งเข้า prompt
     include: { knowledgeBase: { where: { isActive: true } } },
   });
@@ -576,9 +577,10 @@ export async function visionAssistReply(opts: {
   summary?: string;
 }> {
   const { tenantId, companyId, imageBase64, conversationHistory = [], lastCustomerText } = opts;
+  const botChannel = opts.channel === 'whatsapp' ? 'whatsapp' : 'line';
 
   const botConfig = await prisma.botConfig.findFirst({
-    where: companyId ? { companyId } : { tenantId },
+    where: companyId ? { companyId, channel: botChannel } : { tenantId, channel: botChannel },
     include: { knowledgeBase: { where: { isActive: true }, orderBy: { createdAt: 'desc' } } },
   });
 

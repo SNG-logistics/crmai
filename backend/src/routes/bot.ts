@@ -57,6 +57,13 @@ function cleanText(value: unknown, maxLength: number): string {
   return (typeof value === 'string' ? value : '').trim().slice(0, maxLength);
 }
 
+type BotChannel = 'line' | 'whatsapp';
+
+function resolveBotChannel(req: Request): BotChannel {
+  const value = req.query.channel || req.body?.channel;
+  return value === 'whatsapp' ? 'whatsapp' : 'line';
+}
+
 // เลือกบริษัทที่จะจัดการ config: ?companyId= หรือ body.companyId ; ไม่ระบุ → บริษัทเริ่มต้นของ tenant
 // (สร้างบริษัทเริ่มต้นให้อัตโนมัติถ้ายังไม่มี — กัน tenant เก่าที่ยังไม่ backfill)
 async function resolveCompanyId(req: Request): Promise<string> {
@@ -77,25 +84,57 @@ async function resolveCompanyId(req: Request): Promise<string> {
   return def.id;
 }
 
-async function ensureBotConfig(tenantId: string, companyId: string) {
-  const existing = await prisma.botConfig.findFirst({ where: { companyId } });
+async function ensureBotConfig(tenantId: string, companyId: string, channel: BotChannel) {
+  const existing = await prisma.botConfig.findFirst({ where: { companyId, channel } });
   if (existing) return existing;
   try {
-    return await prisma.botConfig.create({
-      data: {
-        tenantId,
-        companyId,
-        name: 'AI LINE BOT',
-        systemPrompt: '',
-        model: 'gemini-3.6-flash',
-        temperature: 0.7,
-        isActive: true,
-        metadata: '{}',
-      },
+    return await prisma.$transaction(async tx => {
+      const createdWhileWaiting = await tx.botConfig.findFirst({ where: { companyId, channel } });
+      if (createdWhileWaiting) return createdWhileWaiting;
+
+      // The first time WhatsApp is opened, preserve the current behaviour by copying
+      // the existing LINE config and knowledge. Future changes are fully independent.
+      const source = channel === 'whatsapp'
+        ? await tx.botConfig.findFirst({
+            where: { companyId, channel: 'line' },
+            include: { knowledgeBase: true },
+          })
+        : null;
+      const created = await tx.botConfig.create({
+        data: {
+          tenantId,
+          companyId,
+          channel,
+          name: channel === 'whatsapp' ? 'AI WhatsApp' : 'AI LINE BOT',
+          systemPrompt: source?.systemPrompt || '',
+          model: source?.model || 'gemini-3.6-flash',
+          temperature: source?.temperature ?? 0.7,
+          isActive: source?.isActive ?? true,
+          metadata: source?.metadata || '{}',
+        },
+      });
+      if (source?.knowledgeBase.length) {
+        await tx.knowledgeBase.createMany({
+          data: source.knowledgeBase.map(item => ({
+            botConfigId: created.id,
+            question: item.question,
+            answer: item.answer,
+            category: item.category,
+            sourceType: item.sourceType,
+            sourceText: item.sourceText,
+            imageUrl: item.imageUrl,
+            imagePreviewUrl: item.imagePreviewUrl,
+            imageAnalysis: item.imageAnalysis,
+            sendImage: item.sendImage,
+            isActive: item.isActive,
+          })),
+        });
+      }
+      return created;
     });
   } catch {
-    // ป้องกันคำขอพร้อมกันสร้าง config ซ้ำจาก unique(companyId)
-    const createdByOtherRequest = await prisma.botConfig.findFirst({ where: { companyId } });
+    // ป้องกันคำขอพร้อมกันสร้าง config ซ้ำจาก unique(companyId, channel)
+    const createdByOtherRequest = await prisma.botConfig.findFirst({ where: { companyId, channel } });
     if (createdByOtherRequest) return createdByOtherRequest;
     throw new Error('สร้างการตั้งค่า AI ไม่สำเร็จ');
   }
@@ -104,8 +143,10 @@ async function ensureBotConfig(tenantId: string, companyId: string) {
 router.get('/', async (req: Request, res: Response) => {
   try {
     const companyId = await resolveCompanyId(req);
+    const channel = resolveBotChannel(req);
+    await ensureBotConfig(req.tenantId!, companyId, channel);
     const bot = await prisma.botConfig.findFirst({
-      where: { companyId },
+      where: { companyId, channel },
       include: { knowledgeBase: { where: { isActive: true }, orderBy: { createdAt: 'desc' } } },
     });
     return res.json({ success: true, bot, companyId });
@@ -116,16 +157,18 @@ router.put('/', async (req: Request, res: Response) => {
   try {
     const { systemPrompt, model, temperature, isActive, settings } = req.body;
     const companyId = await resolveCompanyId(req);
-    const existing = await prisma.botConfig.findFirst({ where: { companyId } });
+    const channel = resolveBotChannel(req);
+    const existing = await ensureBotConfig(req.tenantId!, companyId, channel);
     // merge metadata เดิมเสมอ เพื่อไม่ให้หน้า WhatsApp/AI เขียนค่าของอีกหน้าหาย
     let currentMetadata: any = {};
     try { currentMetadata = JSON.parse(existing?.metadata || '{}'); } catch { currentMetadata = {}; }
     const metadata = settings !== undefined
       ? JSON.stringify({ ...currentMetadata, ...(settings || {}) })
       : undefined;
-    const bot = existing
-      ? await prisma.botConfig.update({ where: { id: existing.id }, data: { systemPrompt, model, temperature, isActive, ...(metadata !== undefined ? { metadata } : {}) } })
-      : await prisma.botConfig.create({ data: { tenantId: req.tenantId!, companyId, name: 'AI Bot', systemPrompt, model, temperature, isActive, metadata: metadata || '{}' } });
+    const bot = await prisma.botConfig.update({
+      where: { id: existing.id },
+      data: { systemPrompt, model, temperature, isActive, ...(metadata !== undefined ? { metadata } : {}) },
+    });
     return res.json({ success: true, bot });
   } catch { return res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' }); }
 });
@@ -134,7 +177,8 @@ router.put('/', async (req: Request, res: Response) => {
 router.get('/knowledge', async (req: Request, res: Response) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const bot = await prisma.botConfig.findFirst({ where: { companyId } });
+    const channel = resolveBotChannel(req);
+    const bot = await prisma.botConfig.findFirst({ where: { companyId, channel } });
     if (!bot) return res.json({ success: true, items: [], total: 0, hasMore: false });
     const sourceType = req.query.sourceType === 'visual' ? 'visual'
       : req.query.sourceType === 'qa' ? 'qa'
@@ -164,7 +208,7 @@ router.get('/knowledge', async (req: Request, res: Response) => {
 router.post('/knowledge', async (req: Request, res: Response) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const bot = await ensureBotConfig(req.tenantId!, companyId);
+    const bot = await ensureBotConfig(req.tenantId!, companyId, resolveBotChannel(req));
     const question = cleanText(req.body?.question, 1000);
     const answer = cleanText(req.body?.answer, 20000);
     const category = cleanText(req.body?.category, 100) || 'general';
@@ -190,7 +234,7 @@ router.post('/knowledge/upload', acceptDocumentKnowledgeUpload, async (req: Requ
     }
 
     const companyId = await resolveCompanyId(req);
-    const bot = await ensureBotConfig(req.tenantId!, companyId);
+    const bot = await ensureBotConfig(req.tenantId!, companyId, resolveBotChannel(req));
     const category = cleanText(req.body?.category, 100) || 'เอกสาร';
     const parsedFiles: Array<Awaited<ReturnType<typeof parseKnowledgeFile>>> = [];
     const failures: Array<{ fileName: string; message: string }> = [];
@@ -255,7 +299,7 @@ router.post('/knowledge/visual', acceptVisualKnowledgeUpload, async (req: Reques
   const savedImagePaths: string[] = [];
   try {
     const companyId = await resolveCompanyId(req);
-    const bot = await ensureBotConfig(req.tenantId!, companyId);
+    const bot = await ensureBotConfig(req.tenantId!, companyId, resolveBotChannel(req));
     const sourceText = cleanText(req.body?.sourceText, 12000);
     const category = cleanText(req.body?.category, 100) || 'visual';
     const sendImage = req.body?.sendImage !== 'false';
@@ -368,7 +412,7 @@ router.post('/knowledge/visual', acceptVisualKnowledgeUpload, async (req: Reques
 router.put('/knowledge/:id', async (req: Request, res: Response) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const bot = await prisma.botConfig.findFirst({ where: { companyId }, select: { id: true } });
+    const bot = await prisma.botConfig.findFirst({ where: { companyId, channel: resolveBotChannel(req) }, select: { id: true } });
     if (!bot) return res.status(404).json({ success: false, message: 'ไม่พบการตั้งค่า AI ของบริษัทนี้' });
     const existing = await prisma.knowledgeBase.findFirst({
       where: { id: req.params.id, botConfigId: bot.id },
@@ -389,7 +433,7 @@ router.put('/knowledge/:id', async (req: Request, res: Response) => {
 router.delete('/knowledge/:id', async (req: Request, res: Response) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const bot = await prisma.botConfig.findFirst({ where: { companyId }, select: { id: true } });
+    const bot = await prisma.botConfig.findFirst({ where: { companyId, channel: resolveBotChannel(req) }, select: { id: true } });
     if (!bot) return res.status(404).json({ success: false, message: 'ไม่พบการตั้งค่า AI ของบริษัทนี้' });
     const item = await prisma.knowledgeBase.findFirst({
       where: { id: req.params.id, botConfigId: bot.id },
@@ -399,6 +443,14 @@ router.delete('/knowledge/:id', async (req: Request, res: Response) => {
     await prisma.knowledgeBase.delete({ where: { id: item.id } });
     for (const storedUrl of [item.imageUrl, item.imagePreviewUrl]) {
       if (storedUrl?.startsWith('/uploads/knowledge/')) {
+        // A migration snapshot may let LINE and WhatsApp reference the same
+        // physical image. Only remove the file after the last reference is gone.
+        const remainingReferences = await prisma.knowledgeBase.count({
+          where: {
+            OR: [{ imageUrl: storedUrl }, { imagePreviewUrl: storedUrl }],
+          },
+        });
+        if (remainingReferences > 0) continue;
         const filePath = path.resolve(process.cwd(), storedUrl.replace(/^\/+/, ''));
         if (filePath.startsWith(VISUAL_KNOWLEDGE_DIR + path.sep)) {
           await fs.promises.unlink(filePath).catch(() => undefined);
@@ -419,7 +471,7 @@ router.post('/test', async (req: Request, res: Response) => {
       (message || '').toString(),
       undefined,
       companyId,
-      { channel: ['line', 'whatsapp', 'telegram'].includes(channel) ? channel : undefined },
+      { channel: channel === 'whatsapp' ? 'whatsapp' : 'line' },
     );
     return res.json({
       success: true,
@@ -437,7 +489,7 @@ router.post('/test', async (req: Request, res: Response) => {
 router.post('/auto-seed', async (req: Request, res: Response) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const bot = await prisma.botConfig.findFirst({ where: { companyId } });
+    const bot = await prisma.botConfig.findFirst({ where: { companyId, channel: resolveBotChannel(req) } });
     if (!bot) return res.status(404).json({ success: false, message: 'กรุณาตั้งค่า Bot ก่อน' });
 
     const { category = 'general', count = 10 } = req.body;
@@ -503,7 +555,8 @@ router.put('/extended', async (req: Request, res: Response) => {
   try {
     const { welcomeMessage, quickReplies, handoffKeywords, whatsappLanguage } = req.body;
     const companyId = await resolveCompanyId(req);
-    const existing = await prisma.botConfig.findFirst({ where: { companyId } });
+    const channel = resolveBotChannel(req);
+    const existing = await ensureBotConfig(req.tenantId!, companyId, channel);
     let current: any = {};
     try { current = JSON.parse(existing?.metadata || '{}'); } catch { current = {}; }
     const metadata = JSON.stringify({
@@ -513,11 +566,7 @@ router.put('/extended', async (req: Request, res: Response) => {
       handoffKeywords,
       whatsappLanguage: whatsappLanguage === 'lo' ? 'lo' : 'th',
     });
-    const bot = existing
-      ? await prisma.botConfig.update({ where: { id: existing.id }, data: { metadata } })
-      : await prisma.botConfig.create({
-          data: { tenantId: req.tenantId!, companyId, name: 'AI Bot', systemPrompt: '', model: 'gemini-3.6-flash', temperature: 0.7, isActive: true, metadata },
-        });
+    const bot = await prisma.botConfig.update({ where: { id: existing.id }, data: { metadata } });
     return res.json({ success: true, bot });
   } catch (err: any) {
     return res.status(500).json({ success: false, message: err.message });
@@ -528,7 +577,7 @@ router.put('/extended', async (req: Request, res: Response) => {
 router.get('/extended', async (req: Request, res: Response) => {
   try {
     const companyId = await resolveCompanyId(req);
-    const bot = await prisma.botConfig.findFirst({ where: { companyId } });
+    const bot = await prisma.botConfig.findFirst({ where: { companyId, channel: resolveBotChannel(req) } });
     let extended: any = {};
     if (bot && (bot as any).metadata) {
       try { extended = JSON.parse((bot as any).metadata); } catch { extended = {}; }

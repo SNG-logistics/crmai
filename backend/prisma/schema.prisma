@@ -329,6 +329,7 @@ model BotConfig {
   tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   companyId     String? // บริษัทเจ้าของ config นี้ (null = config ระดับ tenant เดิม)
   company       Company?        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  channel       String          @default("line") // line | whatsapp
   name          String
   isActive      Boolean         @default(true)
   systemPrompt  String          @default("You are a helpful customer service assistant.")
@@ -339,9 +340,10 @@ model BotConfig {
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
-  // per-company AI: 1 บริษัท = 1 ชุดตั้งค่า AI (โหลด/บันทึกด้วย companyId)
-  @@unique([companyId])
+  // per-channel AI: LINE และ WhatsApp ของแต่ละบริษัทแยกการตั้งค่า/ความรู้จากกัน
+  @@unique([companyId, channel])
   @@index([tenantId])
+  @@index([tenantId, channel])
 }
 
 // =============================================

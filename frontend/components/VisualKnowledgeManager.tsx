@@ -22,12 +22,13 @@ type VisualKnowledgeItem = {
 type Props = {
   companyId: string;
   companyName?: string;
+  channel: 'line' | 'whatsapp';
 };
 
 const PAGE_SIZE = 20;
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
-export default function VisualKnowledgeManager({ companyId, companyName }: Props) {
+export default function VisualKnowledgeManager({ companyId, companyName, channel }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<VisualKnowledgeItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -65,6 +66,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
       const response = await api.get('/bot/knowledge', {
         params: {
           companyId,
+          channel,
           sourceType: 'visual',
           page: nextPage,
           limit: PAGE_SIZE,
@@ -80,7 +82,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
     } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, channel]);
 
   useEffect(() => {
     setItems([]);
@@ -89,7 +91,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
     setFile(null);
     setSourceText('');
     loadPage(1, true);
-  }, [companyId, loadPage]);
+  }, [companyId, channel, loadPage]);
 
   const chooseFile = (nextFile?: File) => {
     if (!nextFile) return;
@@ -130,6 +132,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
     }
     const formData = new FormData();
     formData.append('companyId', companyId);
+    formData.append('channel', channel);
     formData.append('sourceText', sourceText.trim());
     formData.append('category', category.trim() || 'ข้อมูลจากรูป');
     formData.append('sendImage', String(sendImage));
@@ -147,7 +150,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
       setSourceText('');
       setSendImage(true);
       clearFile();
-      toast.success('เพิ่มความรู้ให้ AI สำเร็จ ใช้ได้ทั้ง LINE และ WhatsApp ✅', { id: toastId });
+      toast.success(`เพิ่มความรู้ให้ AI ${channel === 'whatsapp' ? 'WhatsApp' : 'LINE'} สำเร็จ ✅`, { id: toastId });
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'วิเคราะห์และบันทึกความรู้ไม่สำเร็จ', { id: toastId });
     } finally {
@@ -161,7 +164,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
       const response = await api.put(
         `/bot/knowledge/${item.id}`,
         { isActive: !item.isActive },
-        { params: { companyId } },
+        { params: { companyId, channel } },
       );
       setItems(current => current.map(row => row.id === item.id ? response.data.item : row));
     } catch (error: any) {
@@ -177,7 +180,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
       const response = await api.put(
         `/bot/knowledge/${item.id}`,
         { sendImage: !item.sendImage },
-        { params: { companyId } },
+        { params: { companyId, channel } },
       );
       setItems(current => current.map(row => row.id === item.id ? response.data.item : row));
       toast.success(response.data.item.sendImage ? 'เปิดส่งรูปพร้อมคำตอบแล้ว' : 'ปิดการส่งรูปแล้ว');
@@ -192,7 +195,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
     if (!window.confirm(`ลบความรู้ “${item.question}” ใช่ไหม? รูปต้นฉบับจะถูกลบด้วย`)) return;
     setBusyId(item.id);
     try {
-      await api.delete(`/bot/knowledge/${item.id}`, { params: { companyId } });
+      await api.delete(`/bot/knowledge/${item.id}`, { params: { companyId, channel } });
       setItems(current => current.filter(row => row.id !== item.id));
       setTotal(current => Math.max(0, current - 1));
       toast.success('ลบความรู้แล้ว');
@@ -209,7 +212,7 @@ export default function VisualKnowledgeManager({ companyId, companyName }: Props
         <div>
           <div style={{ fontWeight: 800, fontSize: '1rem' }}>🖼️ ความรู้จากรูป + ข้อความ</div>
           <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem', lineHeight: 1.6, marginTop: 4 }}>
-            AI จะอ่านตัวหนังสือและข้อเท็จจริงในรูป แล้วใช้ตอบลูกค้าของ {companyName || 'บริษัทนี้'} ทั้ง LINE และ WhatsApp
+            AI จะอ่านตัวหนังสือและข้อเท็จจริงในรูป แล้วใช้ตอบลูกค้าของ {companyName || 'บริษัทนี้'} เฉพาะ {channel === 'whatsapp' ? 'WhatsApp' : 'LINE'}
           </div>
         </div>
         <span className="tag" style={{ whiteSpace: 'nowrap' }}>{total.toLocaleString()} รายการ · เพิ่มได้ไม่จำกัด</span>

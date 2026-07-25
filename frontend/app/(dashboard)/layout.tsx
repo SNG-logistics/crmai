@@ -18,6 +18,7 @@ const NAV_KEYS = [
   { href: '/broadcasts',       icon: '📣', key: 'nav_broadcasts' },
   { href: '/automation',       icon: '⚡', key: 'nav_automation' },
   { href: '/bot',              icon: '🤖', key: 'nav_bot'        },
+  { href: '/ai-training',      icon: '🧠', key: 'nav_ai_training' },
   { href: '/analytics',        icon: '📊', key: 'nav_analytics'  },
   { href: '/live',             icon: '🔴', key: 'nav_live'       },
   { href: '/flex',             icon: '✉️', key: 'nav_flex'       },

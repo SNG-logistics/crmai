@@ -4,7 +4,6 @@ import toast from 'react-hot-toast';
 import api from '../../../lib/api';
 import VisualKnowledgeManager from '../../../components/VisualKnowledgeManager';
 import KnowledgeFileManager from '../../../components/KnowledgeFileManager';
-import ChatTrainingExport from '../../../components/ChatTrainingExport';
 
 export default function BotPage() {
   const [bot, setBot] = useState<any>(null);
@@ -32,7 +31,7 @@ export default function BotPage() {
   // โหลด config ของบริษัทที่เลือก (ไม่ส่ง companyId = บริษัทเริ่มต้น)
   const loadBot = (cid?: string) => {
     setLoading(true);
-    api.get('/bot', { params: cid ? { companyId: cid } : {} }).then(r => {
+    api.get('/bot', { params: cid ? { companyId: cid, channel: 'line' } : { channel: 'line' } }).then(r => {
       const b = r.data.bot;
       setBot(b);
       if (!cid && r.data.companyId) setCompanyId(r.data.companyId);
@@ -66,7 +65,7 @@ export default function BotPage() {
     setSaving(true);
     const tid = toast.loading('กำลังบันทึก...');
     try {
-      const r = await api.put('/bot', { ...form, companyId, settings });
+      const r = await api.put('/bot', { ...form, companyId, channel: 'line', settings });
       setBot(r.data.bot);
       toast.success(`บันทึกการตั้งค่า AI ของ ${companyName || 'บริษัท'} สำเร็จ ✅`, { id: tid });
     }
@@ -77,7 +76,7 @@ export default function BotPage() {
   const addKb = async () => {
     if (!newKb.question || !newKb.answer) return;
     try {
-      const r = await api.post('/bot/knowledge', { ...newKb, companyId });
+      const r = await api.post('/bot/knowledge', { ...newKb, companyId, channel: 'line' });
       setKb(prev => [r.data.item, ...prev]);
       setNewKb({ question: '', answer: '', category: 'general' });
     } catch (e: any) {
@@ -86,7 +85,7 @@ export default function BotPage() {
   };
 
   const deleteKb = async (id: string) => {
-    await api.delete(`/bot/knowledge/${id}`, { params: { companyId } });
+    await api.delete(`/bot/knowledge/${id}`, { params: { companyId, channel: 'line' } });
     setKb(prev => prev.filter(k => k.id !== id));
   };
 
@@ -97,7 +96,7 @@ export default function BotPage() {
     setTestHistory(prev => [...prev, userMsg]);
     setTestMsg('');
     try {
-      const r = await api.post('/bot/test', { message: userMsg.content, history: testHistory, companyId });
+      const r = await api.post('/bot/test', { message: userMsg.content, history: testHistory, companyId, channel: 'line' });
       setTestHistory(prev => [...prev, { role: 'assistant', content: r.data.reply, imageUrl: r.data.imageUrl }]);
     } finally { setTesting(false); }
   };
@@ -267,15 +266,11 @@ export default function BotPage() {
         </div>
 
         <div style={{ marginTop: 20 }}>
-          <ChatTrainingExport companyId={companyId} companyName={companyName} />
+          <KnowledgeFileManager companyId={companyId} companyName={companyName} channel="line" />
         </div>
 
         <div style={{ marginTop: 20 }}>
-          <KnowledgeFileManager companyId={companyId} companyName={companyName} />
-        </div>
-
-        <div style={{ marginTop: 20 }}>
-          <VisualKnowledgeManager companyId={companyId} companyName={companyName} />
+          <VisualKnowledgeManager companyId={companyId} companyName={companyName} channel="line" />
         </div>
       </div>
 

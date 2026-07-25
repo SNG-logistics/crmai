@@ -452,6 +452,7 @@ export default function InboxPage() {
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([]);
   const [search, setSearch] = useState('');
   const [sending, setSending] = useState(false);
+  const [exportingChat, setExportingChat] = useState(false);
   const [aiSuggest, setAiSuggest] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
   // ─── Enchant (พิมพ์ลาว → แปลไทย + แนะนำ 3 โทน) ───────────────────────────────
@@ -755,6 +756,45 @@ export default function InboxPage() {
     textareaRef.current?.focus();
   };
 
+  const exportCurrentChat = async () => {
+    if (!activeConv || exportingChat) return;
+    setExportingChat(true);
+    const toastId = toast.loading('กำลัง Export ห้องแชทสำหรับ Train AI...');
+    try {
+      const response = await api.post('/conversations/export', {
+        conversationIds: [activeConv.id],
+        format: 'jsonl',
+        anonymize: true,
+      }, {
+        responseType: 'blob',
+        timeout: 180000,
+      });
+      const disposition = String(response.headers['content-disposition'] || '');
+      const fileName = disposition.match(/filename="?([^";]+)"?/i)?.[1]
+        || `crm-ai-training-${activeConv.id}.jsonl`;
+      const url = URL.createObjectURL(response.data);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Export ห้องแชทสำเร็จ (ปิดบังข้อมูลส่วนตัวแล้ว)', { id: toastId });
+    } catch (error: any) {
+      let message = error.response?.data?.message || error.message || 'Export ห้องแชทไม่สำเร็จ';
+      if (error.response?.data instanceof Blob) {
+        try {
+          const parsed = JSON.parse(await error.response.data.text());
+          message = parsed.message || message;
+        } catch { /* keep the regular message */ }
+      }
+      toast.error(message, { id: toastId });
+    } finally {
+      setExportingChat(false);
+    }
+  };
+
   // ─── Toggle Bot/Human ─────────────────────────────────────────────────────
   const toggleBot = async () => {
     if (!activeConv) return;
@@ -934,6 +974,14 @@ export default function InboxPage() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={exportCurrentChat}
+                  disabled={exportingChat}
+                  title="Export ห้องแชทนี้เป็น JSONL สำหรับ Train AI (ปิดบังข้อมูลส่วนตัว)"
+                >
+                  {exportingChat ? <span className="spinner" style={{ width: 13, height: 13 }} /> : '⬇️'} Export AI
+                </button>
                 {/* Sync/Refresh Button */}
                 <button
                   className="btn btn-ghost btn-sm btn-icon"

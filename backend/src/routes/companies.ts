@@ -45,14 +45,19 @@ router.post('/', requireRole('admin', 'superadmin'), async (req: Request, res: R
       data: { tenantId, name, slug: (req.body.slug || '').toString().trim() || null, logo: req.body.logo || null },
     });
 
-    // BotConfig เริ่มต้นของบริษัท (per-company AI)
-    await prisma.botConfig.create({
-      data: {
-        tenantId, companyId: company.id, name: `AI Bot — ${name}`,
+    // LINE and WhatsApp start as separate configs from the first day.
+    await prisma.botConfig.createMany({
+      data: ['line', 'whatsapp'].map(channel => ({
+        tenantId,
+        companyId: company.id,
+        channel,
+        name: channel === 'line' ? `AI LINE — ${name}` : `AI WhatsApp — ${name}`,
         systemPrompt: '',
-        model: 'gemini-3.6-flash', temperature: 0.7, isActive: true,
-        metadata: JSON.stringify({ whatsappLanguage: 'th' }),
-      },
+        model: 'gemini-3.6-flash',
+        temperature: 0.7,
+        isActive: true,
+        metadata: channel === 'whatsapp' ? JSON.stringify({ whatsappLanguage: 'th' }) : '{}',
+      })),
     }).catch(() => {});
 
     return res.status(201).json({ success: true, company });

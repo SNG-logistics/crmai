@@ -17,6 +17,7 @@ type KnowledgeItem = {
 type Props = {
   companyId: string;
   companyName?: string;
+  channel: 'line' | 'whatsapp';
 };
 
 const ACCEPT = '.csv,.xlsx,.txt,.md,.markdown,.json,.pdf,.docx,.log,.html,.htm,.xml,.yaml,.yml';
@@ -28,7 +29,7 @@ function extensionOf(fileName: string): string {
   return index >= 0 ? fileName.slice(index).toLocaleLowerCase() : '';
 }
 
-export default function KnowledgeFileManager({ companyId, companyName }: Props) {
+export default function KnowledgeFileManager({ companyId, companyName, channel }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [category, setCategory] = useState('เอกสาร');
@@ -50,7 +51,7 @@ export default function KnowledgeFileManager({ companyId, companyName }: Props) 
     setLoading(true);
     try {
       const response = await api.get('/bot/knowledge', {
-        params: { companyId, sourceType: 'document', page: nextPage, limit: PAGE_SIZE },
+        params: { companyId, channel, sourceType: 'document', page: nextPage, limit: PAGE_SIZE },
       });
       const nextItems: KnowledgeItem[] = response.data.items || [];
       setItems(current => reset ? nextItems : [...current, ...nextItems]);
@@ -62,12 +63,12 @@ export default function KnowledgeFileManager({ companyId, companyName }: Props) 
     } finally {
       setLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, channel]);
 
   useEffect(() => {
     setFiles([]);
     loadItems(1, true);
-  }, [companyId, loadItems]);
+  }, [companyId, channel, loadItems]);
 
   const addFiles = (incoming: File[]) => {
     const accepted: File[] = [];
@@ -109,6 +110,7 @@ export default function KnowledgeFileManager({ companyId, companyName }: Props) 
 
     const formData = new FormData();
     formData.append('companyId', companyId);
+    formData.append('channel', channel);
     formData.append('category', category.trim() || 'เอกสาร');
     files.forEach(file => formData.append('files', file));
 
@@ -140,7 +142,7 @@ export default function KnowledgeFileManager({ companyId, companyName }: Props) 
       const response = await api.put(
         `/bot/knowledge/${item.id}`,
         { isActive: !item.isActive },
-        { params: { companyId } },
+        { params: { companyId, channel } },
       );
       setItems(current => current.map(row => row.id === item.id ? response.data.item : row));
     } catch (error: any) {
@@ -154,7 +156,7 @@ export default function KnowledgeFileManager({ companyId, companyName }: Props) 
     if (!window.confirm(`ลบความรู้ “${item.question}” ใช่ไหม?`)) return;
     setBusyId(item.id);
     try {
-      await api.delete(`/bot/knowledge/${item.id}`, { params: { companyId } });
+      await api.delete(`/bot/knowledge/${item.id}`, { params: { companyId, channel } });
       setItems(current => current.filter(row => row.id !== item.id));
       setTotal(current => Math.max(0, current - 1));
       toast.success('ลบความรู้แล้ว');
@@ -171,7 +173,7 @@ export default function KnowledgeFileManager({ companyId, companyName }: Props) 
         <div>
           <div style={{ fontWeight: 800, fontSize: '1rem' }}>📚 อัปโหลดไฟล์เข้าคลังความรู้</div>
           <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem', lineHeight: 1.6, marginTop: 4 }}>
-            CSV/XLSX ที่มีคอลัมน์ question–answer จะสร้าง Q&A อัตโนมัติ ส่วนเอกสารจะถูกแบ่งเป็นช่วงเพื่อให้ AI ของ {companyName || 'บริษัทนี้'} ค้นหาได้ตรงคำถาม
+            CSV/XLSX ที่มีคอลัมน์ question–answer จะสร้าง Q&A อัตโนมัติ ส่วนเอกสารจะถูกแบ่งเป็นช่วงเพื่อให้ AI {channel === 'whatsapp' ? 'WhatsApp' : 'LINE'} ของ {companyName || 'บริษัทนี้'} ค้นหาได้ตรงคำถาม
           </div>
         </div>
         <span className="tag" style={{ whiteSpace: 'nowrap' }}>{total.toLocaleString()} รายการ</span>

@@ -229,7 +229,7 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
 
     // 5. AI Bot reply — เคารพสวิตช์ AI auto-reply ต่อบริษัท (botConfig ของ company)
     if (conversation.isBot && (msgType === 'text' || msgType === 'image')) {
-      const bot = await prisma.botConfig.findFirst({ where: { companyId }, select: { isActive: true, metadata: true } });
+      const bot = await prisma.botConfig.findFirst({ where: { companyId, channel: 'whatsapp' }, select: { isActive: true, metadata: true } });
       if (bot?.isActive !== false) {
         if (msgType === 'text') {
           await processBotReply(ctx, conversation.id, contact.id, content, jid);
@@ -268,7 +268,7 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
 
     const contact = await prisma.contact.findFirst({ where: { id: contactId, tenantId } });
     if (!contact) return;
-    const botConfig = await prisma.botConfig.findFirst({ where: { companyId }, select: { metadata: true } });
+    const botConfig = await prisma.botConfig.findFirst({ where: { companyId, channel: 'whatsapp' }, select: { metadata: true } });
     const language = parseBotSettings(botConfig?.metadata).whatsappLanguage || 'th';
     const lastBot = [...history].reverse().find((m: any) => m.senderType === 'bot');
     let lastBotMeta: any = {};

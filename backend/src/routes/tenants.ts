@@ -46,8 +46,16 @@ router.post('/tenants', async (req: Request, res: Response) => {
       return res.status(502).json({ success: false, message: `สร้างผู้ดูแลใน Firebase ไม่สำเร็จ: ${e.message}` });
     }
 
-    // Create default bot config (ผูกกับบริษัทเริ่มต้น)
-    await prisma.botConfig.create({ data: { tenantId: tenant.id, companyId: company.id, name: 'AI Bot', systemPrompt: `คุณเป็น AI Assistant ของ ${name} ที่พร้อมช่วยเหลือลูกค้าด้วยความเป็นมิตรและมืออาชีพ` } });
+    // Create independent LINE and WhatsApp configs for the default company.
+    await prisma.botConfig.createMany({
+      data: ['line', 'whatsapp'].map(channel => ({
+        tenantId: tenant.id,
+        companyId: company.id,
+        channel,
+        name: channel === 'line' ? 'AI LINE' : 'AI WhatsApp',
+        systemPrompt: `คุณเป็น AI Assistant ของ ${name} ที่พร้อมช่วยเหลือลูกค้าด้วยความเป็นมิตรและมืออาชีพ`,
+      })),
+    });
     res.status(201).json({ success: true, tenant, firebaseWarning });
   } catch (err: any) { res.status(500).json({ success: false, message: err.message }); }
 });

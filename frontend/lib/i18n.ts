@@ -10,6 +10,7 @@ export const translations = {
   nav_broadcasts:      { th: 'Broadcast',            lo: 'ສົ່ງຫາຫຼາຍຄົນ' },
   nav_automation:      { th: 'Automation',           lo: 'ລະບົບອັດຕະໂນມັດ' },
   nav_bot:             { th: 'AI LINE BOT',          lo: 'AI LINE BOT' },
+  nav_ai_training:     { th: 'Export แชท Train AI',  lo: 'Export ແຊັດ Train AI' },
   nav_analytics:       { th: 'รายงาน',               lo: 'ລາຍງານ' },
   nav_telesales:       { th: 'Telesales',            lo: 'ທີມໂທຂາຍ' },
   nav_live:            { th: 'Live Dashboard',       lo: 'ໄລທ໌ດ໋າດ' },
