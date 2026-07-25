@@ -93,6 +93,44 @@ async function resolveCustomerPhone(sock: WASocket, msg: any, jid: string): Prom
   return undefined;
 }
 
+async function repairStoredLidContacts(ctx: AccountCtx, sock: WASocket): Promise<void> {
+  const contacts = await prisma.contact.findMany({
+    where: { tenantId: ctx.tenantId, whatsappId: { endsWith: '@lid' } },
+    select: { id: true, displayName: true, phone: true, whatsappId: true, customFields: true },
+  });
+  let repaired = 0;
+  for (const contact of contacts) {
+    if (!contact.whatsappId) continue;
+    try {
+      const mapped = await sock.signalRepository.lidMapping.getPNForLID(contact.whatsappId);
+      const phone = phoneFromWhatsAppIdentifier(mapped);
+      if (!phone) continue;
+
+      const data: { phone: string; displayName?: string; customFields?: string } = { phone };
+      if (!contact.displayName || /@lid$/i.test(contact.displayName)) data.displayName = phone;
+      try {
+        const customFields = JSON.parse(contact.customFields || '{}');
+        let customFieldsChanged = false;
+        for (const key of ['crm_profile', 'registration_snapshot']) {
+          const section = customFields[key];
+          if (section && typeof section === 'object' && section.phone && !normalizeCustomerPhone(section.phone)) {
+            section.phone = phone;
+            customFieldsChanged = true;
+          }
+        }
+        if (customFieldsChanged) data.customFields = JSON.stringify(customFields);
+      } catch {
+        // customFields ที่เสียไม่เกี่ยวกับการ map เบอร์ จึงยังซ่อมฟิลด์ Contact ต่อได้
+      }
+      await prisma.contact.update({ where: { id: contact.id }, data });
+      repaired += 1;
+    } catch {
+      // mapping บาง LID อาจยังไม่อยู่ใน signal store; ข้อความถัดไปจะลองซ่อมอีกครั้ง
+    }
+  }
+  if (repaired) console.log(`[WA] Repaired ${repaired} stored LID contact(s) with real phone numbers`);
+}
+
 function isDepositNotCredited(text: string): boolean {
   return /ฝาก.{0,12}(ไม่เข้า|ยังไม่เข้า|หาย|ไม่มา)|โอน.{0,12}(ไม่เข้า|ยังไม่เข้า)|ยอด.{0,8}(ไม่เข้า|ยังไม่เข้า)|ຝາກ.{0,12}(ບໍ່ເຂົ້າ|ຍັງບໍ່ເຂົ້າ)|ໂອນ.{0,12}(ບໍ່ເຂົ້າ|ຍັງບໍ່ເຂົ້າ)/i.test(text || '');
 }
@@ -168,6 +206,9 @@ export async function connectWhatsAppAccount(accountId: string): Promise<void> {
       await prisma.whatsAppAccount.update({ where: { id: accountId }, data: { status: 'connected', phone, isActive: true } }).catch(() => {});
       emitToTenant(ctx.tenantId, 'whatsapp:connected', { accountId, companyId: ctx.companyId, phone });
       console.log(`[WA] Connected account=${accountId} phone=${phone}`);
+      void repairStoredLidContacts(ctx, sock).catch(error => {
+        console.warn('[WA] Stored LID contact repair failed:', error?.message || error);
+      });
     }
 
     if (connection === 'close') {
