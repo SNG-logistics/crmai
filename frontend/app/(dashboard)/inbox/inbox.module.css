@@ -353,7 +353,11 @@
   .inbox {
     grid-template-columns: 1fr;
     position: relative;
+    height: 100vh;
+    height: 100dvh; /* Dynamic viewport height for mobile browsers */
   }
+
+  /* ── Conversation List Drawer ── */
   .convList {
     display: flex !important;
     position: fixed;
@@ -372,6 +376,7 @@
   }
   .chatArea {
     width: 100%;
+    height: 100%;
   }
   .convBackdrop {
     display: none;
@@ -387,14 +392,14 @@
     display: flex !important;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    width: 34px;
+    height: 34px;
     border-radius: 10px;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--border);
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 1.2rem;
+    font-size: 1.1rem;
     flex-shrink: 0;
   }
   .drawerClose {
@@ -415,42 +420,172 @@
     z-index: 10;
   }
 
-  /* ── Mobile chat adjustments ── */
+  /* ══ Mobile Chat Header ══ */
   .chatHeader {
-    padding: 8px 10px;
+    padding: 8px 12px;
     gap: 8px;
-    min-height: 50px;
+    min-height: 52px;
   }
+  /* Hide verbose elements on mobile */
+  .chatHeaderHideMobile {
+    display: none !important;
+  }
+  /* Compact actions row */
+  .chatHeaderActions {
+    gap: 6px !important;
+  }
+
+  /* ── Mobile More Menu ── */
+  .mobileMoreBtn {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+    font-family: inherit;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .mobileMoreBtn:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .mobileMoreMenu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 6px;
+    min-width: 200px;
+    background: rgba(20, 26, 52, 0.98);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border-hover);
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+    z-index: 100;
+    overflow: hidden;
+    animation: slideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .mobileMoreMenuItem {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-family: inherit;
+    width: 100%;
+    text-align: left;
+    transition: background 0.15s;
+    font-weight: 500;
+  }
+  .mobileMoreMenuItem:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .mobileMoreMenuItem:not(:last-child) {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  }
+  .mobileMoreMenuDanger {
+    color: var(--danger);
+  }
+
+  /* ══ Mobile Messages ══ */
   .messages {
-    padding: 10px 8px;
+    padding: 12px 10px;
     gap: 8px;
   }
   .msgBubble {
-    max-width: 85%;
-    padding: 10px 12px;
+    max-width: 82%;
+    padding: 10px 14px;
     font-size: 0.85rem;
   }
   .msgMeta {
-    font-size: 0.62rem;
+    font-size: 0.64rem;
   }
   .aiSuggest {
-    margin: 0 8px 8px;
-    padding: 10px 12px;
-    font-size: 0.78rem;
+    margin: 0 10px 8px;
+    padding: 10px 14px;
+    font-size: 0.8rem;
   }
   .cannedPopup {
-    left: 8px;
-    right: 60px;
-    max-height: 200px;
+    left: 10px;
+    right: 10px;
+    max-height: 220px;
+    border-radius: 14px;
   }
 
-  /* AI Panel: full-width slide-in from right */
+  /* ══ Mobile Input Area ══ */
+  .chatInput {
+    background: rgba(13, 17, 34, 0.95);
+    backdrop-filter: blur(10px);
+  }
+  /* Compact enchant bar */
+  .enchantBar {
+    padding: 6px 12px 0 !important;
+    gap: 6px !important;
+  }
+  .enchantHint {
+    display: none !important;
+  }
+  /* Input row: horizontal buttons */
+  .inputRow {
+    padding: 8px 10px !important;
+    gap: 6px !important;
+  }
+  .inputBtnGroup {
+    flex-direction: row !important;
+    gap: 4px !important;
+  }
+
+  /* ══ AI Panel: Bottom Sheet style ══ */
   .aiPanel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
     width: 100%;
     max-width: 100vw;
+    max-height: 70vh;
     z-index: 300;
+    border-radius: 20px 20px 0 0;
+    border-left: none;
+    border-top: 1px solid var(--border-hover);
+    transform: translateY(100%);
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.6);
+  }
+  .aiPanelOpen {
+    transform: translateY(0);
   }
   .aiPanelBackdrop {
     z-index: 299;
+  }
+  .aiPanelClose {
+    display: flex;
+    top: 10px;
+    right: 10px;
+  }
+  /* Bottom sheet handle indicator */
+  .aiPanelHandle {
+    display: block !important;
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.2);
+    margin: 8px auto 4px;
+  }
+
+  /* ── Notification bars compact ── */
+  .noticeBar {
+    padding: 4px 12px !important;
+    font-size: 0.68rem !important;
   }
 }

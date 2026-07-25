@@ -484,6 +484,7 @@ export default function InboxPage() {
   // ─── Mobile drawer ─────────────────────────────────────────────────────
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // ─── Load conversations ───────────────────────────────────────────────────
   const loadConversations = useCallback(async () => {
@@ -980,9 +981,9 @@ export default function InboxPage() {
                   }}>⚠️ ตอบผ่าน CRM เท่านั้น</span>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+              <div className={styles.chatHeaderActions} style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
                 <button
-                  className="btn btn-secondary btn-sm"
+                  className={`btn btn-secondary btn-sm ${styles.chatHeaderHideMobile}`}
                   onClick={exportCurrentChat}
                   disabled={exportingChat}
                   title="Export ห้องแชทนี้เป็น JSONL สำหรับ Train AI (ปิดบังข้อมูลส่วนตัว)"
@@ -991,7 +992,7 @@ export default function InboxPage() {
                 </button>
                 {/* Sync/Refresh Button */}
                 <button
-                  className="btn btn-ghost btn-sm btn-icon"
+                  className={`btn btn-ghost btn-sm btn-icon ${styles.chatHeaderHideMobile}`}
                   onClick={syncMessages}
                   disabled={syncing}
                   title="รีเฟรชข้อความล่าสุด"
@@ -1004,7 +1005,7 @@ export default function InboxPage() {
                 </button>
                 {/* Bot/Human Toggle */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px', background: 'var(--bg-tertiary)', borderRadius: 20, border: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: '0.75rem', color: activeConv.isBot ? 'var(--purple)' : 'var(--teal)' }}>
+                  <span className={styles.chatHeaderHideMobile} style={{ fontSize: '0.75rem', color: activeConv.isBot ? 'var(--purple)' : 'var(--teal)' }}>
                     {activeConv.isBot ? '🤖 Bot' : '👤 Human'}
                   </span>
                   <label className="toggle" style={{ transform: 'scale(0.85)' }}>
@@ -1014,10 +1015,41 @@ export default function InboxPage() {
                 </div>
                 {/* Resolve */}
                 {activeConv.status !== 'resolved' && (
-                  <button className="btn btn-secondary btn-sm" onClick={resolveConversation} title="ปิดบทสนทนา">
+                  <button className={`btn btn-secondary btn-sm ${styles.chatHeaderHideMobile}`} onClick={resolveConversation} title="ปิดบทสนทนา">
                     ✅ ปิด
                   </button>
                 )}
+                {/* AI Panel Toggle (Tablet/Mobile) */}
+                <button 
+                  className={styles.aiPanelToggle} 
+                  onClick={() => setAiPanelOpen(true)}
+                  title="เปิด AI Assistant"
+                >
+                  ✨
+                </button>
+                {/* Mobile More Button */}
+                <button 
+                  className={styles.mobileMoreBtn} 
+                  onClick={() => setMobileMenuOpen(v => !v)}
+                  title="เพิ่มเติม"
+                >
+                  ⋯
+                  {mobileMenuOpen && (
+                    <div className={styles.mobileMoreMenu}>
+                      <button className={styles.mobileMoreMenuItem} onClick={(e) => { e.stopPropagation(); setMobileMenuOpen(false); exportCurrentChat(); }}>
+                        {exportingChat ? <span className="spinner" style={{ width: 13, height: 13 }} /> : '⬇️'} Export AI
+                      </button>
+                      <button className={styles.mobileMoreMenuItem} onClick={(e) => { e.stopPropagation(); setMobileMenuOpen(false); syncMessages(); }}>
+                        {syncing ? <span className="spinner" style={{ width: 13, height: 13 }} /> : '🔄'} Sync รีเฟรชข้อความ
+                      </button>
+                      {activeConv.status !== 'resolved' && (
+                        <button className={`${styles.mobileMoreMenuItem} ${styles.mobileMoreMenuDanger}`} onClick={(e) => { e.stopPropagation(); setMobileMenuOpen(false); resolveConversation(); }}>
+                          ✅ ปิดบทสนทนา
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </button>
               </div>
             </div>
 
@@ -1218,7 +1250,7 @@ export default function InboxPage() {
               )}
               {/* ── Enchant toolbar — พิมพ์ลาว แล้วให้ AI แปล+แนะนำ ── */}
               {!activeConv.isBot && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px 0' }}>
+                <div className={styles.enchantBar} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px 0' }}>
                   <button
                     className="btn btn-sm"
                     onClick={enchantDraft}
@@ -1230,7 +1262,7 @@ export default function InboxPage() {
                       ? <><span className="spinner" style={{ width: 13, height: 13 }} /> กำลังคิด...</>
                       : '✨ Enchant'}
                   </button>
-                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                  <span className={styles.enchantHint} style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
                     พิมพ์ภาษาลาว แล้วกด Enchant → AI แปลไทย + แนะนำคำตอบ 3 โทน
                   </span>
                 </div>
@@ -1249,7 +1281,7 @@ export default function InboxPage() {
                   />
                 </div>
               )}
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', padding: '12px 16px' }}>
+              <div className={styles.inputRow} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', padding: '12px 16px' }}>
 
                 <div style={{ flex: 1, position: 'relative' }}>
                   <textarea
@@ -1276,7 +1308,7 @@ export default function InboxPage() {
                     {newMsg.length > 0 ? `${newMsg.length}` : ''}
                   </span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div className={styles.inputBtnGroup} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                   <button className="btn btn-ghost btn-sm btn-icon"
                     title="⚡ Key ลัด — คำตอบที่ตั้งไว้"
                     onClick={() => { setCannedFilter('/'); setShowCanned(v => !v); textareaRef.current?.focus(); }}>
@@ -1299,13 +1331,20 @@ export default function InboxPage() {
 
       {/* ═══ RIGHT: AI Smart Admin Panel ════════════════════════════════════ */}
       {activeConv && (
-        <AiAdminPanel
-          conv={activeConv}
-          messages={messages}
-          onUseDraft={(text: string) => { setNewMsg(text); textareaRef.current?.focus(); }}
-          onResolve={resolveConversation}
-          onToggleBot={toggleBot}
-        />
+        <>
+          <div className={`${styles.aiPanelBackdrop} ${aiPanelOpen ? styles.aiPanelOpen : ''}`} onClick={() => setAiPanelOpen(false)} />
+          <div className={`${styles.aiPanel} ${aiPanelOpen ? styles.aiPanelOpen : ''}`}>
+            <div className={styles.aiPanelHandle} onClick={() => setAiPanelOpen(false)} />
+            <button className={styles.aiPanelClose} onClick={() => setAiPanelOpen(false)}>✕</button>
+            <AiAdminPanel
+              conv={activeConv}
+              messages={messages}
+              onUseDraft={(text: string) => { setNewMsg(text); textareaRef.current?.focus(); setAiPanelOpen(false); }}
+              onResolve={() => { resolveConversation(); setAiPanelOpen(false); }}
+              onToggleBot={toggleBot}
+            />
+          </div>
+        </>
       )}
     </div>
   );
@@ -1374,7 +1413,7 @@ function AiAdminPanel({ conv, messages, onUseDraft, onResolve, onToggleBot }: {
   const URGENCY_COLOR: any   = { low: 'var(--success)', medium: 'var(--warning)', high: 'var(--danger)' };
 
   return (
-    <div style={{ width: 280, flexShrink: 0, borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Tab selector */}
       <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         {[

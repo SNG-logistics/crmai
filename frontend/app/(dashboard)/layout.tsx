@@ -206,7 +206,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       </aside>
 
       {/* ─── Main content ─────────────────────────────────────────── */}
-      <div className="main-layout">
+      <div className={`main-layout ${pathname.startsWith('/inbox') ? 'inbox-page' : ''}`}>
         <header className="topbar">
           <button
             className="btn btn-ghost btn-icon"

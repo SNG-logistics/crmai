@@ -1,0 +1,8 @@
+=== push lufy shortlink 404 fix === 
+From https://github.com/SNG-logistics/crmai
+ * branch            main       -> FETCH_HEAD
+Already up to date.
+Everything up-to-date
+ff075b7 fix: KB matching threshold, mobile inbox drawer, knowledge base integration
+207c69c fix(ai): keep knowledge matching relevant
+=== END === 

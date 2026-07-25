@@ -425,6 +425,9 @@ tr:hover td { background: rgba(255,255,255,0.015); color: var(--text-primary); }
   .sidebar.open { transform: translateX(0); }
   .main-layout { margin-left: 0; }
   .form-row { grid-template-columns: 1fr; }
+  
+  /* Hide dashboard topbar on mobile inbox to save space */
+  .inbox-page .topbar { display: none; }
 }
 
 /* Live Dashboard pulse dot */
