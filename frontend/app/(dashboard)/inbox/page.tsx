@@ -307,10 +307,11 @@ function SlipBadge({ data }: { data: any }) {
 }
 
 // ─── Message Bubble ──────────────────────────────────────────────────────────
-function MessageBubble({ msg, contactName, channel }: { msg: Message; contactName: string; channel?: string }) {
+function MessageBubble({ msg, contactName, channel, lang }: { msg: Message; contactName: string; channel?: string; lang: string }) {
   const isCustomer = msg.senderType === 'customer';
   const isBot = msg.senderType === 'bot';
   const [lightbox, setLightbox] = useState(false);
+  const [transcriptExpanded, setTranscriptExpanded] = useState(false);
 
   // Parse metadata ครั้งเดียว ใช้ร่วมกันทั้ง slip / รูป / เสียง / วิดีโอ / ไฟล์
   const meta: any = (() => {
@@ -409,14 +410,59 @@ function MessageBubble({ msg, contactName, channel }: { msg: Message; contactNam
     // ─── เสียง (voice note) — เล่นฟังได้ในหน้า Inbox ─────────────────────────────
     if (msg.type === 'audio') {
       const audioUrl = meta?.audioUrl || null;
-      if (audioUrl) {
-        return (
-          <div style={{ minWidth: 220 }}>
+      const transcription = meta?.voice?.transcription;
+      const transcriptText = typeof transcription === 'string'
+        ? transcription.trim()
+        : typeof transcription?.text === 'string'
+          ? transcription.text.trim()
+          : '';
+      const transcriptStatus = String(
+        typeof transcription === 'string'
+          ? 'complete'
+          : transcription?.status || (transcriptText ? 'complete' : '')
+      ).toLowerCase();
+      const isPending = ['queued', 'pending', 'waiting'].includes(transcriptStatus);
+      const isProcessing = ['processing', 'transcribing', 'in_progress'].includes(transcriptStatus);
+      const isComplete = ['complete', 'completed', 'success', 'ready'].includes(transcriptStatus) || !!transcriptText;
+      const isFailed = ['failed', 'error'].includes(transcriptStatus);
+      const isLongTranscript = transcriptText.length > 240;
+      const visibleTranscript = isLongTranscript && !transcriptExpanded
+        ? `${transcriptText.slice(0, 240).trimEnd()}…`
+        : transcriptText;
+      const voiceLabels = lang === 'lo'
+        ? {
+            audio: 'ສຽງ',
+            download: 'ດາວໂຫຼດສຽງ',
+            pending: 'AI ກຳລັງລໍຖ້າຟັງສຽງ...',
+            processing: 'AI ກຳລັງຟັງ ແລະ ຖອດສຽງ...',
+            transcript: 'ຂໍ້ຄວາມທີ່ AI ໄດ້ຍິນ',
+            noSpeech: 'ຖອດສຽງແລ້ວ ແຕ່ບໍ່ພົບຄຳເວົ້າທີ່ຊັດເຈນ',
+            failed: 'AI ບໍ່ສາມາດຟັງສຽງໄດ້ — ແອດມິນຍັງສາມາດກົດຟັງໄດ້',
+            expand: 'ສະແດງທັງໝົດ',
+            collapse: 'ຫຍໍ້ຂໍ້ຄວາມ',
+          }
+        : {
+            audio: 'เสียง',
+            download: 'ดาวน์โหลดเสียง',
+            pending: 'AI กำลังรอฟังเสียง...',
+            processing: 'AI กำลังฟังและถอดเสียง...',
+            transcript: 'ข้อความที่ AI ได้ยิน',
+            noSpeech: 'ถอดเสียงแล้ว แต่ไม่พบคำพูดที่ชัดเจน',
+            failed: 'AI ฟังเสียงไม่สำเร็จ — แอดมินยังกดเล่นเพื่อฟังได้',
+            expand: 'แสดงทั้งหมด',
+            collapse: 'ย่อข้อความ',
+          };
+
+      return (
+        <div style={{ width: 240, maxWidth: '100%', minWidth: 0 }}>
+          {audioUrl ? (
+            <>
             <audio
               controls
               preload="metadata"
               src={audioUrl}
-              style={{ width: 240, height: 40, display: 'block' }}
+              aria-label={voiceLabels.audio}
+              style={{ width: '100%', maxWidth: '100%', minWidth: 0, height: 40, display: 'block' }}
             />
             <a
               href={audioUrl}
@@ -425,12 +471,46 @@ function MessageBubble({ msg, contactName, channel }: { msg: Message; contactNam
               rel="noreferrer"
               style={{ display: 'inline-block', marginTop: 4, fontSize: '0.7rem', color: 'var(--text-muted)', textDecoration: 'none' }}
             >
-              ⬇️ ดาวน์โหลดเสียง
+              ⬇️ {voiceLabels.download}
             </a>
-          </div>
-        );
-      }
-      return <span>🎵 เสียง</span>;
+            </>
+          ) : (
+            <span>🎵 {voiceLabels.audio}</span>
+          )}
+
+          {(isPending || isProcessing) && (
+            <div style={{ marginTop: 7, padding: '7px 9px', borderRadius: 8, background: 'rgba(6,182,212,.1)', border: '1px solid rgba(6,182,212,.24)', color: 'var(--teal)', fontSize: '0.72rem', lineHeight: 1.45 }}>
+              ⏳ {isProcessing ? voiceLabels.processing : voiceLabels.pending}
+            </div>
+          )}
+
+          {isComplete && (
+            <div style={{ marginTop: 7, padding: '8px 9px', borderRadius: 8, background: 'rgba(16,185,129,.08)', border: '1px solid rgba(16,185,129,.24)', fontSize: '0.74rem', lineHeight: 1.5 }}>
+              <div style={{ color: '#10B981', fontWeight: 700, marginBottom: transcriptText ? 3 : 0 }}>
+                📝 {voiceLabels.transcript}
+              </div>
+              <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--text-secondary)' }}>
+                {visibleTranscript || voiceLabels.noSpeech}
+              </div>
+              {isLongTranscript && (
+                <button
+                  type="button"
+                  onClick={() => setTranscriptExpanded(value => !value)}
+                  style={{ marginTop: 4, padding: 0, border: 0, background: 'transparent', color: 'var(--teal)', fontFamily: 'inherit', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer' }}
+                >
+                  {transcriptExpanded ? voiceLabels.collapse : voiceLabels.expand}
+                </button>
+              )}
+            </div>
+          )}
+
+          {isFailed && !isComplete && (
+            <div style={{ marginTop: 7, padding: '7px 9px', borderRadius: 8, background: 'rgba(245,158,11,.1)', border: '1px solid rgba(245,158,11,.28)', color: 'var(--warning)', fontSize: '0.72rem', lineHeight: 1.45 }}>
+              ⚠️ {voiceLabels.failed}
+            </div>
+          )}
+        </div>
+      );
     }
     // ─── วิดีโอ ─────────────────────────────────────────────────────────────────
     if (msg.type === 'video') {
@@ -1150,7 +1230,7 @@ export default function InboxPage() {
                 </div>
               )}
               {messages.map(msg => (
-                <MessageBubble key={msg.id} msg={msg} contactName={activeConv.contact?.displayName} channel={activeConv.channel} />
+                <MessageBubble key={msg.id} msg={msg} contactName={activeConv.contact?.displayName} channel={activeConv.channel} lang={lang} />
               ))}
               {/* Typing Indicator — สำหรับที่แอดมินอื่นกำลังพิมพ์ */}
               {typingUsers.length > 0 && (

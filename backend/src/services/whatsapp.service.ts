@@ -7,6 +7,7 @@ import {
   isJidGroup,
   jidNormalizedUser,
   downloadMediaMessage,
+  normalizeMessageContent,
   proto,
   WAMessageContent,
   WASocket,
@@ -34,6 +35,10 @@ import {
   BonusTimeWhatsAppResult,
   buildBonusTimeWhatsAppResult,
 } from './bonustime.service';
+import {
+  AudioTranscriptionError,
+  transcribeAudioFile,
+} from './audio-transcription.service';
 import { verifySlip } from './slip-verify.service';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -56,6 +61,7 @@ const statusMap = new Map<string, WAStatus>();  // accountId → status
 const phoneMap  = new Map<string, string>();    // accountId → phone
 const ctxMap    = new Map<string, AccountCtx>();// accountId → ctx (tenant/company/session)
 const registrationReplyTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const incomingMessageInFlight = new Set<string>();
 const REGISTRATION_IDLE_MS = 12_000;
 
 // conversation.channelId ของ whatsapp = "<accountId>:<jid>" เพื่อแยกเบอร์
@@ -301,16 +307,45 @@ export async function connectWhatsAppAccount(accountId: string): Promise<void> {
 
 // ─── Handle incoming message pipeline ────────────────────────────────────────
 async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) {
+  const platformMsgId = typeof msg.key?.id === 'string' ? msg.key.id : undefined;
+  const inFlightKey = platformMsgId ? `${ctx.accountId}:${platformMsgId}` : undefined;
+  if (inFlightKey && incomingMessageInFlight.has(inFlightKey)) {
+    console.log(`[WA] Duplicate incoming message ignored (in-flight) account=${ctx.accountId} id=${platformMsgId}`);
+    return;
+  }
+  if (inFlightKey) incomingMessageInFlight.add(inFlightKey);
+
   try {
     const { tenantId, companyId, accountId } = ctx;
     const jid     = msg.key.remoteJid as string;
     const phone   = await resolveCustomerPhone(sock, msg, jid);
-    const content = extractMessageText(msg.message);
-    const msgType = detectMsgType(msg.message);
-    const platformMsgId = msg.key.id;
+
+    // Baileys อาจห่อข้อความจริงไว้ใน ephemeral/view-once/edited message
+    // ต้อง unwrap ก่อนตรวจชนิด ไม่เช่นนั้น voice note บางรายการจะถูกมองเป็น text
+    const normalizedContent = normalizeMessageContent(msg.message);
+    if (!normalizedContent) return;
+    const content = extractMessageText(normalizedContent);
+    const msgType = detectMsgType(normalizedContent);
+
+    // กัน event เดิมที่ถูกส่งซ้ำหลัง reconnect ก่อนดาวน์โหลดไฟล์หรือเรียก AI
+    if (platformMsgId) {
+      const duplicate = await prisma.message.findFirst({
+        where: {
+          tenantId,
+          platformMsgId,
+          senderType: 'customer',
+          conversation: { whatsAppAccountId: accountId },
+        },
+        select: { id: true },
+      });
+      if (duplicate) {
+        console.log(`[WA] Duplicate incoming message ignored (stored) account=${accountId} id=${platformMsgId}`);
+        return;
+      }
+    }
 
     // ดาวน์โหลดสื่อ (รูป/เสียง/วิดีโอ/ไฟล์) → เก็บเป็น static file ให้แอดมินเปิดดู/ฟังได้
-    const mediaMeta = await downloadWhatsAppMedia(sock, msg, msgType);
+    const mediaMeta = await downloadWhatsAppMedia(sock, msg, msgType, normalizedContent);
 
     // 1. Contact (ระดับ tenant — ลูกค้าคนเดียวใช้ contact เดียวข้ามบริษัทได้)
     let contact = await prisma.contact.findFirst({
@@ -367,13 +402,19 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
     //    (เดิมบรรทัดนี้ force isBot:true ทุกข้อความ → สลับ Human ไม่ติด)
 
     // 3. Message (แนบ URL สื่อลง metadata)
+    const incomingMetadata: Record<string, unknown> = {
+      waJid: jid,
+      waPhone: phone,
+      pushName: msg.pushName,
+      ...mediaMeta,
+    };
     const message = await prisma.message.create({
       data: {
         conversationId: conversation.id, tenantId,
         senderType: 'customer', type: msgType,
         content: content || `[${msgType}]`,
         platformMsgId,
-        metadata: JSON.stringify({ waJid: jid, waPhone: phone, pushName: msg.pushName, ...mediaMeta }),
+        metadata: JSON.stringify(incomingMetadata),
       },
     });
     await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
@@ -386,19 +427,33 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
     });
 
     // 5. AI Bot reply — เคารพสวิตช์ AI auto-reply ต่อบริษัท (botConfig ของ company)
-    if (conversation.isBot && (msgType === 'text' || msgType === 'image')) {
+    if (conversation.isBot && (msgType === 'text' || msgType === 'image' || msgType === 'audio')) {
       const bot = await prisma.botConfig.findFirst({ where: { companyId, channel: 'whatsapp' }, select: { isActive: true, metadata: true } });
       if (bot?.isActive !== false) {
         if (msgType === 'text') {
           await processBotReply(ctx, conversation.id, contact.id, content, jid);
         } else if (mediaMeta.imageUrl) {
           const language = parseBotSettings(bot?.metadata).whatsappLanguage || 'th';
-          await processWhatsAppImage(ctx, conversation.id, contact.id, message.id, platformMsgId, mediaMeta.imageUrl, jid, language);
+          await processWhatsAppImage(ctx, conversation.id, contact.id, message.id, platformMsgId || message.id, mediaMeta.imageUrl, jid, language);
+        } else if (msgType === 'audio') {
+          const language = parseBotSettings(bot?.metadata).whatsappLanguage || 'th';
+          await processWhatsAppAudio(
+            ctx,
+            conversation.id,
+            contact.id,
+            message.id,
+            mediaMeta,
+            incomingMetadata,
+            jid,
+            language,
+          );
         }
       }
     }
   } catch (err) {
     console.error('[WA] handleIncomingMessage error:', err);
+  } finally {
+    if (inFlightKey) incomingMessageInFlight.delete(inFlightKey);
   }
 }
 
@@ -653,6 +708,136 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
   }
 }
 
+function resolveIncomingWhatsAppAudioFile(audioUrl?: string): string | undefined {
+  const raw = String(audioUrl || '').trim();
+  const pathOnly = raw.split(/[?#]/, 1)[0];
+  if (!pathOnly.startsWith('/uploads/whatsapp-media/')) return undefined;
+
+  try {
+    const decoded = decodeURIComponent(pathOnly);
+    const mediaRoot = fs.realpathSync(path.resolve(process.cwd(), 'uploads', 'whatsapp-media'));
+    const candidate = path.resolve(process.cwd(), decoded.replace(/^\/+/, ''));
+    if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) return undefined;
+
+    const realFile = fs.realpathSync(candidate);
+    const relative = path.relative(mediaRoot, realFile);
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      return undefined;
+    }
+    if (!/\.(?:flac|ogg|opus|mp3|m4a|mp4|aac|wav|webm|3gp)$/i.test(realFile)) return undefined;
+    return realFile;
+  } catch {
+    return undefined;
+  }
+}
+
+async function processWhatsAppAudio(
+  ctx: AccountCtx,
+  conversationId: string,
+  contactId: string,
+  dbMessageId: string,
+  mediaMeta: WhatsAppMediaMetadata,
+  originalMetadata: Record<string, unknown>,
+  jid: string,
+  language: 'th' | 'lo',
+) {
+  const voiceDetails = {
+    ptt: mediaMeta.ptt === true,
+    durationSeconds: mediaMeta.durationSeconds || 0,
+  };
+  const processingMetadata = {
+    ...originalMetadata,
+    voice: {
+      ...voiceDetails,
+      transcription: { status: 'processing' },
+    },
+  };
+
+  try {
+    await prisma.message.update({
+      where: { id: dbMessageId },
+      data: { metadata: JSON.stringify(processingMetadata) },
+    });
+    emitToTenant(ctx.tenantId, 'conversation_updated', { id: conversationId });
+
+    const filePath = resolveIncomingWhatsAppAudioFile(mediaMeta.audioUrl);
+    if (!filePath) {
+      const missingFile = new Error('WhatsApp audio file is unavailable') as Error & { code?: string };
+      missingFile.code = 'file_not_found';
+      throw missingFile;
+    }
+
+    const transcription = await transcribeAudioFile({
+      filePath,
+      mimetype: mediaMeta.mimetype,
+      language,
+      durationSeconds: mediaMeta.durationSeconds,
+    });
+    const transcript = transcription.text.trim();
+    if (!transcript) {
+      const emptyTranscript = new Error('Audio transcript is empty') as Error & { code?: string };
+      emptyTranscript.code = 'empty_transcript';
+      throw emptyTranscript;
+    }
+
+    const completedMetadata = {
+      ...originalMetadata,
+      voice: {
+        ...voiceDetails,
+        transcription: {
+          status: 'complete',
+          text: transcript,
+          language: transcription.language || language,
+          model: transcription.model,
+        },
+      },
+    };
+    await prisma.message.update({
+      where: { id: dbMessageId },
+      data: {
+        content: transcript,
+        metadata: JSON.stringify(completedMetadata),
+      },
+    });
+    emitToTenant(ctx.tenantId, 'conversation_updated', { id: conversationId });
+
+    // ใช้ flow เดิมเพียงครั้งเดียว เพื่อให้ registration/BONUSTIME/KB ทำงานกับ transcript
+    await processBotReply(ctx, conversationId, contactId, transcript, jid);
+  } catch (error: any) {
+    const errorCode = error instanceof AudioTranscriptionError
+      ? error.code
+      : (typeof error?.code === 'string' ? error.code : 'transcription_failed');
+    const failedMetadata = {
+      ...originalMetadata,
+      voice: {
+        ...voiceDetails,
+        transcription: {
+          status: 'failed',
+          errorCode,
+        },
+      },
+    };
+    try {
+      await prisma.message.update({
+        where: { id: dbMessageId },
+        data: { metadata: JSON.stringify(failedMetadata) },
+      });
+    } catch (updateError: any) {
+      console.error('[WA] Voice transcription status update failed:', updateError?.message || updateError);
+    }
+    emitToTenant(ctx.tenantId, 'conversation_updated', { id: conversationId });
+
+    console.warn(`[WA] Voice transcription failed message=${dbMessageId} code=${errorCode}`);
+    const fallback = language === 'lo'
+      ? 'ຂໍອະໄພເຈົ້າ ລະບົບຟັງສຽງບໍ່ສຳເລັດ ກະລຸນາສົ່ງສຽງໃໝ່ ຫຼືພິມຂໍ້ຄວາມມາໄດ້ເລີຍເຈົ້າ 🙏'
+      : 'ขออภัยค่ะ ระบบฟังเสียงไม่สำเร็จ กรุณาส่งเสียงใหม่อีกครั้ง หรือพิมพ์ข้อความมาได้เลยค่ะ 🙏';
+    await sendStoredBotText(ctx, conversationId, jid, fallback, {
+      flow: 'voice_transcription_error',
+      errorCode,
+    });
+  }
+}
+
 async function processWhatsAppImage(
   ctx: AccountCtx,
   conversationId: string,
@@ -834,6 +1019,17 @@ export async function initWhatsAppSessions() {
 // ─── Media download ─────────────────────────────────────────────────────────
 const mediaLogger = pino({ level: 'silent' });
 
+interface WhatsAppMediaMetadata {
+  imageUrl?: string;
+  audioUrl?: string;
+  videoUrl?: string;
+  fileUrl?: string;
+  fileName?: string;
+  mimetype?: string;
+  durationSeconds?: number;
+  ptt?: boolean;
+}
+
 // map mimetype → นามสกุลไฟล์ (ใช้ mimetype ก่อน ถ้าไม่มีค่อยเดาจากชนิดข้อความ)
 function mediaExt(msgType: string, mimetype: string): string {
   const mt = (mimetype || '').toLowerCase();
@@ -841,6 +1037,8 @@ function mediaExt(msgType: string, mimetype: string): string {
   if (mt.includes('png'))  return 'png';
   if (mt.includes('webp')) return 'webp';
   if (mt.includes('gif'))  return 'gif';
+  if (mt.includes('flac')) return 'flac';
+  if (mt.includes('webm')) return 'webm';
   if (mt.includes('mp4'))  return 'mp4';
   if (mt.includes('3gpp')) return '3gp';
   if (mt.includes('ogg'))  return 'ogg';
@@ -858,15 +1056,23 @@ function mediaExt(msgType: string, mimetype: string): string {
  * ดาวน์โหลดสื่อจากข้อความ WhatsApp แล้วเก็บเป็นไฟล์ static ใน /uploads/whatsapp-media
  * คืน metadata (imageUrl / audioUrl / videoUrl / fileUrl) ให้แนบกับ message
  */
-async function downloadWhatsAppMedia(sock: WASocket, msg: any, msgType: string): Promise<Record<string, string>> {
+async function downloadWhatsAppMedia(
+  sock: WASocket,
+  msg: any,
+  msgType: string,
+  normalizedContent?: WAMessageContent,
+): Promise<WhatsAppMediaMetadata> {
   if (!['image', 'audio', 'video', 'sticker', 'file'].includes(msgType)) return {};
   try {
+    const content = normalizedContent || normalizeMessageContent(msg.message);
+    const audioNode = content?.audioMessage;
+    const documentNode = content?.documentMessage;
     const node =
-      msg.message?.imageMessage ||
-      msg.message?.videoMessage ||
-      msg.message?.audioMessage ||
-      msg.message?.stickerMessage ||
-      msg.message?.documentMessage;
+      content?.imageMessage ||
+      content?.videoMessage ||
+      audioNode ||
+      content?.stickerMessage ||
+      documentNode;
     const mimetype: string = node?.mimetype || '';
 
     const buffer = (await downloadMediaMessage(
@@ -889,8 +1095,16 @@ async function downloadWhatsAppMedia(sock: WASocket, msg: any, msgType: string):
 
     if (msgType === 'image' || msgType === 'sticker') return { imageUrl: url };
     if (msgType === 'video') return { videoUrl: url, mimetype };
-    if (msgType === 'audio') return { audioUrl: url, mimetype };
-    return { fileUrl: url, fileName: node?.fileName || filename, mimetype };
+    if (msgType === 'audio') {
+      const rawDuration = Number(audioNode?.seconds || 0);
+      return {
+        audioUrl: url,
+        mimetype,
+        durationSeconds: Number.isFinite(rawDuration) && rawDuration >= 0 ? rawDuration : 0,
+        ptt: audioNode?.ptt === true,
+      };
+    }
+    return { fileUrl: url, fileName: documentNode?.fileName || filename, mimetype };
   } catch (err: any) {
     console.warn('[WA] ⚠️ Media download failed:', err?.message || err);
     return {};
