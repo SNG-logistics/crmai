@@ -80,20 +80,21 @@ export function hashImage(buffer: Buffer): string {
 export async function checkDuplicate(
   tenantId: string,
   imageHash: string
-): Promise<{ isDuplicate: boolean; originalId?: string; originalDate?: Date }> {
-  const existing = await prisma.slipVerification.findFirst({
-    where: { tenantId, imageHash, status: { not: 'error' } },
-    orderBy: { createdAt: 'desc' },
+): Promise<{ isDuplicate: boolean; original?: any; wasApproved?: boolean }> {
+  const matches = await prisma.slipVerification.findMany({
+    where: { tenantId, imageHash },
+    orderBy: { createdAt: 'asc' },
   });
+  if (!matches.length) return { isDuplicate: false };
 
-  if (existing) {
-    return {
-      isDuplicate: true,
-      originalId: existing.id,
-      originalDate: existing.createdAt,
-    };
-  }
-  return { isDuplicate: false };
+  // Keep the first copy as the canonical link, but respect an approval made on
+  // any copy because an admin may have opened and approved a duplicate row.
+  const original = matches.find(item => !item.isDuplicate) || matches[0];
+  return {
+    isDuplicate: true,
+    original,
+    wasApproved: matches.some(item => item.status === 'verified'),
+  };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -109,6 +110,7 @@ interface SlipOKResult {
   transTime?: string;
   senderName?: string;
   receiverName?: string;
+  receiverAccount?: string;
   error?: string;
 }
 
@@ -145,6 +147,7 @@ export async function verifyWithSlipOK(imagePath: string): Promise<SlipOKResult>
         transTime: data.transTime,
         senderName: data.sender?.displayName || data.sender?.name || '',
         receiverName: data.receiver?.displayName || data.receiver?.name || '',
+        receiverAccount: data.receiver?.account || data.receiver?.accountNumber || data.receiver?.proxy?.value || '',
       };
     }
 
@@ -170,6 +173,7 @@ interface AIVisionResult {
   transRef?: string;
   senderName?: string;
   receiverName?: string;
+  receiverAccount?: string;
   confidence?: string;
   suspicious?: boolean;
   reason?: string;
@@ -187,6 +191,7 @@ const AI_VISION_PROMPT = `วิเคราะห์รูปนี้ ตอ�
   "transRef": "เลขอ้างอิง",
   "senderName": "ชื่อผู้โอน",
   "receiverName": "ชื่อผู้รับ",
+  "receiverAccount": "เลขบัญชีผู้รับหรือเลขท้ายบัญชีที่มองเห็น",
   "confidence": "high/medium/low",
   "suspicious": false,
   "reason": ""
@@ -256,10 +261,11 @@ export interface VerifySlipOptions {
   buffer?: Buffer;
   filePath?: string;
   language?: 'th' | 'lo';
+  companyId?: string | null;
 }
 
 export interface VerifySlipResult {
-  status: 'verified' | 'fake' | 'duplicate' | 'not_slip' | 'error';
+  status: 'verified' | 'fake' | 'duplicate' | 'not_slip' | 'error' | 'pending';
   verifiedBy: string;
   amount?: number;
   bankFrom?: string;
@@ -302,15 +308,16 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
   const imgHash = hashImage(buffer);
   const dupCheck = await checkDuplicate(tenantId, imgHash);
 
-  if (dupCheck.isDuplicate) {
-    console.log(`[SlipVerify] ⚠️ Duplicate slip detected! original=${dupCheck.originalId}`);
+  if (dupCheck.isDuplicate && dupCheck.original) {
+    const original = dupCheck.original;
+    console.log(`[SlipVerify] ⚠️ Duplicate slip detected! original=${original.id} status=${original.status}`);
 
     const record = await prisma.slipVerification.create({
       data: {
         tenantId, conversationId, contactId, messageId,
         imageHash: imgHash, imagePath: filePath,
         status: 'duplicate', verifiedBy: 'auto',
-        isDuplicate: true, duplicateOfId: dupCheck.originalId,
+        isDuplicate: true, duplicateOfId: original.id,
       },
     });
 
@@ -320,9 +327,13 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
 
     return {
       status: 'duplicate', verifiedBy: 'auto',
-      message: language === 'lo'
-        ? 'ແອດມິນໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ກຳລັງດຳເນີນການກວດສອບໃຫ້ ລໍຖ້າຈັກຄູ່ເຈົ້າ'
-        : 'แอดมินได้รับสลิปแล้วค่ะ กำลังดำเนินการตรวจสอบให้ รอสักครู่นะคะ',
+      message: dupCheck.wasApproved
+        ? (language === 'lo'
+          ? 'ແອດມິນໄດ້ດຳເນີນການສະລິບນີ້ແລ້ວເຈົ້າ ລົບກວນຢ່າສົ່ງສະລິບເກົ່າຊ້ຳ'
+          : 'แอดมินดำเนินการสลิปนี้แล้วครับ รบกวนลูกค้าอย่าส่งสลิปเก่าซ้ำนะครับ')
+        : (language === 'lo'
+          ? 'ສະລິບນີ້ລູກຄ້າເຄີຍສົ່ງມາແລ້ວເຈົ້າ ລະບົບກຳລັງກວດສອບໃຫ້'
+          : 'สลิปนี้ลูกค้าส่งมาแล้วนะครับ ระบบกำลังตรวจสอบให้ครับ'),
       record,
     };
   }
@@ -334,7 +345,7 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
   const aiResult = await verifyWithAIVision(buffer);
 
   // ── Step 5: Determine final verdict ─────────────────────────────────────
-  let status: 'verified' | 'fake' | 'not_slip' | 'error' = 'error';
+  let status: 'verified' | 'fake' | 'not_slip' | 'error' | 'pending' = 'error';
   let verifiedBy = 'auto';
   let finalAmount = slipok.amount || aiResult.amount;
   let finalBankFrom = bankName(slipok.sendingBank) || aiResult.bankFrom || '';
@@ -342,7 +353,45 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
   let finalTransRef = slipok.transRef || aiResult.transRef || '';
   let message = '';
 
-  if (slipok.success) {
+  // Account allow-list is configured per company in WhatsApp AI settings.
+  let configuredAccounts: Array<{ bank?: string; accountName?: string; accountNumber?: string }> = [];
+  if (opts.companyId) {
+    const config = await prisma.botConfig.findFirst({
+      where: { companyId: opts.companyId, channel: 'whatsapp' },
+      select: { metadata: true },
+    });
+    try {
+      const metadata = JSON.parse(config?.metadata || '{}');
+      if (Array.isArray(metadata.receivingAccounts)) configuredAccounts = metadata.receivingAccounts;
+    } catch { configuredAccounts = []; }
+  }
+  const normalizeText = (value?: string) => (value || '').toLowerCase().replace(/[^ก-๙຀-໿a-z0-9]/g, '');
+  const normalizeDigits = (value?: string) => (value || '').replace(/\D/g, '');
+  const receiverName = slipok.receiverName || aiResult.receiverName || '';
+  const receiverAccount = slipok.receiverAccount || aiResult.receiverAccount || '';
+  const accountMatches = configuredAccounts.length === 0 || configuredAccounts.some(account => {
+    const expectedBank = normalizeText(account.bank);
+    const actualBank = normalizeText(finalBankTo);
+    const expectedName = normalizeText(account.accountName);
+    const actualName = normalizeText(receiverName);
+    const expectedNumber = normalizeDigits(account.accountNumber);
+    const actualNumber = normalizeDigits(receiverAccount);
+    const bankMatches = !expectedBank || actualBank.includes(expectedBank) || expectedBank.includes(actualBank);
+    const nameMatches = !expectedName || actualName.includes(expectedName) || expectedName.includes(actualName);
+    const numberMatches = !expectedNumber || !actualNumber
+      ? !expectedNumber
+      : expectedNumber.endsWith(actualNumber) || actualNumber.endsWith(expectedNumber);
+    return bankMatches && nameMatches && numberMatches;
+  });
+  const accountMismatch = configuredAccounts.length > 0 && !accountMatches;
+
+  if (slipok.success && accountMismatch) {
+    status = 'fake';
+    verifiedBy = 'auto';
+    message = language === 'lo'
+      ? 'ບັນຊີປາຍທາງໃນສະລິບບໍ່ກົງກັບບັນຊີຂອງຮ້ານເຈົ້າ ລົບກວນກວດສອບກ່ອນສົ່ງໃໝ່'
+      : 'บัญชีปลายทางในสลิปไม่ตรงกับบัญชีของร้านครับ รบกวนตรวจสอบก่อนส่งใหม่ครับ';
+  } else if (slipok.success) {
     // SlipOK ยืนยันได้ → เชื่อถือสูง
     status = 'verified';
     verifiedBy = 'slipok';
@@ -371,15 +420,15 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
         ? 'ແອດມິນໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ກຳລັງກວດສອບລາຍລະອຽດເພີ່ມເຕີມໃຫ້'
         : 'แอดมินได้รับสลิปแล้วค่ะ กำลังตรวจสอบรายละเอียดเพิ่มเติมให้ รอสักครู่นะคะ';
     } else {
-      // AI OK แต่ SlipOK ไม่ได้
-      status = 'verified';
+      // AI อ่านรายละเอียดได้ แต่ยังไม่ถือว่าเป็นของจริงจนกว่า SlipOK หรือแอดมินจะยืนยัน
+      status = 'pending';
       verifiedBy = 'ai';
       finalAmount = aiResult.amount;
       finalBankFrom = aiResult.bankFrom || '';
       finalBankTo = aiResult.bankTo || '';
       message = language === 'lo'
         ? `✅ ສະລິບຜ່ານການກວດສອບແລ້ວເຈົ້າ\n💰 ${finalAmount?.toLocaleString() || '?'}\n🏦 ${finalBankFrom} → ${finalBankTo}`
-        : `✅ สลิปผ่านการตรวจสอบแล้วค่ะ (AI)\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}`;
+        : `ได้รับสลิปแล้วครับ ระบบกำลังตรวจสอบให้ครับ\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}`;
       if (aiResult.confidence === 'low') {
         message += language === 'lo'
           ? '\n⚠️ ຮູບບໍ່ຊັດ ແອດມິນຈະກວດສອບເພີ່ມເຕີມໃຫ້ເຈົ້າ'
@@ -419,6 +468,7 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
       // Final
       status, verifiedBy,
       isDuplicate: false,
+      notes: accountMismatch ? `ACCOUNT_MISMATCH receiver=${receiverName} account=${receiverAccount} bank=${finalBankTo}` : undefined,
     },
   });
 

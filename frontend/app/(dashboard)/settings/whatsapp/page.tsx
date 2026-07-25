@@ -16,6 +16,12 @@ interface Company {
   _count?: { whatsappAccounts?: number; conversations?: number; members?: number };
 }
 
+interface ReceivingAccount {
+  bank: string;
+  accountName: string;
+  accountNumber: string;
+}
+
 interface WaAccount {
   id: string;
   companyId: string;
@@ -78,6 +84,7 @@ export default function WhatsAppSettingsPage() {
   // ── AI settings state (per company) ──────────────────────────────────────────
   const [ai, setAi] = useState({ isActive: true, model: 'gemini-3.6-flash', temperature: 0.7, systemPrompt: '' });
   const [ext, setExt] = useState({ welcomeMessage: '', handoffKeywords: '', whatsappLanguage: 'th' as 'th' | 'lo' });
+  const [receivingAccounts, setReceivingAccounts] = useState<ReceivingAccount[]>([]);
   const [aiLoading, setAiLoading] = useState(true);
   const [aiSaving, setAiSaving] = useState(false);
   const [testMsg, setTestMsg] = useState('');
@@ -152,9 +159,11 @@ export default function WhatsAppSettingsPage() {
         handoffKeywords: Array.isArray(ex.handoffKeywords) ? ex.handoffKeywords.join(', ') : (ex.handoffKeywords || ''),
         whatsappLanguage: ex.whatsappLanguage === 'lo' ? 'lo' : 'th',
       });
+      setReceivingAccounts(Array.isArray(ex.receivingAccounts) ? ex.receivingAccounts : []);
     } catch {
       setAi({ isActive: true, model: 'gemini-3.6-flash', temperature: 0.7, systemPrompt: '' });
       setExt({ welcomeMessage: '', handoffKeywords: '', whatsappLanguage: 'th' });
+      setReceivingAccounts([]);
     } finally {
       setAiLoading(false);
     }
@@ -283,6 +292,7 @@ export default function WhatsAppSettingsPage() {
         welcomeMessage: ext.welcomeMessage,
         handoffKeywords: ext.handoffKeywords.split(',').map(s => s.trim()).filter(Boolean),
         whatsappLanguage: ext.whatsappLanguage,
+        receivingAccounts,
       });
       toast.success('✅ บันทึกการตั้งค่า AI แล้ว');
     } catch (e: any) {
@@ -598,6 +608,27 @@ export default function WhatsAppSettingsPage() {
                     <textarea className="input" rows={2} value={ext.welcomeMessage}
                       onChange={e => setExt({ ...ext, welcomeMessage: e.target.value })}
                       placeholder="สวัสดีค่ะ ยินดีให้บริการ มีอะไรให้ช่วยไหมคะ 😊" style={{ resize: 'vertical', fontFamily: 'inherit' }} />
+                  </div>
+
+                  {/* Receiving accounts for slip validation */}
+                  <div style={{ borderTop: '1px solid var(--border)', paddingTop: 18 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                      <div>
+                        <label className="label" style={{ margin: 0 }}>บัญชีรับเงินสำหรับตรวจสลิป</label>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 3 }}>ระบบจะเทียบธนาคาร ชื่อบัญชี และเลขบัญชีปลายทางในสลิป</div>
+                      </div>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setReceivingAccounts(list => [...list, { bank: '', accountName: '', accountNumber: '' }])}>เพิ่มบัญชี</button>
+                    </div>
+                    {receivingAccounts.length === 0 ? (
+                      <div style={{ padding: 12, border: '1px dashed var(--border)', borderRadius: 8, fontSize: '0.75rem', color: 'var(--text-muted)' }}>ยังไม่ได้ตั้งบัญชี ระบบจะไม่ตัดสินว่าบัญชีปลายทางตรงหรือไม่</div>
+                    ) : receivingAccounts.map((account, index) => (
+                      <div key={index} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1.2fr auto', gap: 7, marginBottom: 8 }}>
+                        <input className="input" value={account.bank} placeholder="ธนาคาร" onChange={e => setReceivingAccounts(list => list.map((item, i) => i === index ? { ...item, bank: e.target.value } : item))} />
+                        <input className="input" value={account.accountName} placeholder="ชื่อบัญชี" onChange={e => setReceivingAccounts(list => list.map((item, i) => i === index ? { ...item, accountName: e.target.value } : item))} />
+                        <input className="input" value={account.accountNumber} placeholder="เลขบัญชี" onChange={e => setReceivingAccounts(list => list.map((item, i) => i === index ? { ...item, accountNumber: e.target.value } : item))} />
+                        <button type="button" className="btn btn-danger btn-sm" onClick={() => setReceivingAccounts(list => list.filter((_, i) => i !== index))}>ลบ</button>
+                      </div>
+                    ))}
                   </div>
 
                   {/* Handoff keywords */}

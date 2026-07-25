@@ -383,6 +383,7 @@ async function processWhatsAppImage(
       buffer,
       filePath,
       language,
+      companyId,
     });
 
     let reply = slip.message;

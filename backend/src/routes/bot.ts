@@ -553,18 +553,26 @@ router.post('/auto-seed', async (req: Request, res: Response) => {
 // ─── PUT /api/bot/extended — welcome message, quick replies, handoff keywords ──
 router.put('/extended', async (req: Request, res: Response) => {
   try {
-    const { welcomeMessage, quickReplies, handoffKeywords, whatsappLanguage } = req.body;
+    const { welcomeMessage, quickReplies, handoffKeywords, whatsappLanguage, receivingAccounts } = req.body;
     const companyId = await resolveCompanyId(req);
     const channel = resolveBotChannel(req);
     const existing = await ensureBotConfig(req.tenantId!, companyId, channel);
     let current: any = {};
     try { current = JSON.parse(existing?.metadata || '{}'); } catch { current = {}; }
+    const sanitizedAccounts = Array.isArray(receivingAccounts)
+      ? receivingAccounts.slice(0, 20).map((account: any) => ({
+          bank: cleanText(account?.bank, 100),
+          accountName: cleanText(account?.accountName, 200),
+          accountNumber: cleanText(account?.accountNumber, 50),
+        })).filter((account: any) => account.bank || account.accountName || account.accountNumber)
+      : current.receivingAccounts;
     const metadata = JSON.stringify({
       ...current,
       welcomeMessage,
       quickReplies,
       handoffKeywords,
       whatsappLanguage: whatsappLanguage === 'lo' ? 'lo' : 'th',
+      receivingAccounts: sanitizedAccounts || [],
     });
     const bot = await prisma.botConfig.update({ where: { id: existing.id }, data: { metadata } });
     return res.json({ success: true, bot });
