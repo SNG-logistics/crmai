@@ -93,6 +93,7 @@ function scoreKB(kb: SearchableKnowledge, userMessage: string): number {
 }
 
 const MAX_HISTORY = 10; // จำบริบทได้ยาวขึ้น — ลูกค้าถามต่อเนื่องแล้วบอทไม่ลืมเรื่องเดิม
+const MIN_KB_MATCH_SCORE = 1.5; // ลดจากเกณฑ์เดิมเล็กน้อย แต่ไม่ส่งความรู้ที่ไม่เกี่ยวข้องเข้า prompt
 const MIN_VISUAL_IMAGE_SCORE = 6; // ส่งรูปเฉพาะเมื่อความรู้จากรูปตรงกับคำถามอย่างชัดเจน
 
 export type BotMessageResult = {
@@ -264,17 +265,13 @@ export async function processBotMessage(
 
   // ─ Smart KB matching ─
   const allKb = botConfig?.knowledgeBase || [];
-  // ─── Knowledge Base — คะแนนต่ำเพื่อให้แมตช์ง่าย (ไทย/ลาว)
   const scored = allKb
     .map(kb => ({ ...kb, score: scoreKB(kb, userMessage) }))
     .sort((a, b) => b.score - a.score);
-  // ส่ง 5 อันดับแรกเสมอถ้าเมตช์อะไรได้บ้าง (> 0) — ปล่อยให้ AI ตัดสินว่าตรงหรือไม่
-  const relevantKb = scored.filter(kb => kb.score > 0).slice(0, 5);
-  // ถ้าไม่มีอะไรตรงเลยแต่มี KB อยู่ ส่ง 2 อันดับบนสุดให้ AI ดู (กันพลาด)
-  if (relevantKb.length === 0 && scored.length > 0) {
-    relevantKb.push(...scored.slice(0, 2));
-  }
-  // log debug ให้รู้ว่า KB ถูก match หรือไม่
+  const relevantKb = scored
+    .filter(kb => kb.score >= MIN_KB_MATCH_SCORE)
+    .slice(0, 5);
+  // เก็บคะแนนไว้ตรวจสอบได้ โดยไม่ยัด KB ที่คะแนนเป็นศูนย์เข้า prompt
   if (allKb.length > 0) {
     const top = scored.slice(0, 3).map(k => `${k.question.slice(0, 40)} (score:${k.score.toFixed(1)})`).join(', ');
     logAI(`KB_MATCH user="${userMessage.slice(0, 50)}" top=[${top}] selected=${relevantKb.length}`);
@@ -605,7 +602,7 @@ export async function visionAssistReply(opts: {
   const kb = lastCustomerText
     ? allKb
         .map(item => ({ ...item, score: scoreKB(item, lastCustomerText) }))
-        .filter(item => item.score >= 2)
+        .filter(item => item.score >= MIN_KB_MATCH_SCORE)
         .sort((a, b) => b.score - a.score)
         .slice(0, 5)
     : allKb.slice(0, 10);
