@@ -38,6 +38,7 @@ const MODEL_OPTIONS = [
   { value: 'gpt-4.1-mini', label: 'GPT-4.1 mini' },
   { value: 'gpt-4.1', label: 'GPT-4.1' },
   { value: 'claude-3-7-sonnet-20250219', label: 'Claude 3.7 Sonnet' },
+  { value: 'claude-opus-5', label: 'Claude Opus 5' },
 ];
 
 const STATUS_MAP: Record<WaStatus, { color: string; label: string }> = {
