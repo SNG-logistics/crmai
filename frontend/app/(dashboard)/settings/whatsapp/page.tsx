@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
 import { useSocket } from '../../../../lib/socket';
 import VisualKnowledgeManager from '../../../../components/VisualKnowledgeManager';
+import KnowledgeFileManager from '../../../../components/KnowledgeFileManager';
 
 type WaStatus = 'disconnected' | 'connecting' | 'qr' | 'connected';
 type Tab = 'connect' | 'ai';
@@ -634,6 +635,10 @@ export default function WhatsAppSettingsPage() {
                       💡 การตั้งค่าและฐานความรู้แยกตามบริษัท <b>{selectedCompany?.name}</b> และใช้ตอบเฉพาะลูกค้าของบริษัทนี้
                     </div>
                   </div>
+                </div>
+
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <KnowledgeFileManager companyId={companyId} companyName={selectedCompany?.name} />
                 </div>
 
                 <div style={{ gridColumn: '1 / -1' }}>
