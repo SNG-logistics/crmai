@@ -174,6 +174,8 @@ interface AIVisionResult {
   senderName?: string;
   receiverName?: string;
   receiverAccount?: string;
+  receiverAccountPrefix?: string;
+  receiverAccountSuffix?: string;
   confidence?: string;
   suspicious?: boolean;
   reason?: string;
@@ -191,7 +193,9 @@ const AI_VISION_PROMPT = `วิเคราะห์รูปนี้ ตอ�
   "transRef": "เลขอ้างอิง",
   "senderName": "ชื่อผู้โอน",
   "receiverName": "ชื่อผู้รับ",
-  "receiverAccount": "เลขบัญชีผู้รับหรือเลขท้ายบัญชีที่มองเห็น",
+  "receiverAccount": "เลขบัญชีผู้รับตามที่เห็นทั้งหมด รวมเครื่องหมายปิดบัง เช่น xxx หรือ *",
+  "receiverAccountPrefix": "เลขขึ้นต้นบัญชีผู้รับที่มองเห็น หรือค่าว่าง",
+  "receiverAccountSuffix": "เลขท้ายบัญชีผู้รับที่มองเห็น หรือค่าว่าง",
   "confidence": "high/medium/low",
   "suspicious": false,
   "reason": ""
@@ -204,6 +208,9 @@ const AI_VISION_PROMPT = `วิเคราะห์รูปนี้ ตอ�
 
 กฎตรวจสอบ:
 - ถ้าไม่ใช่สลิปโอนเงิน isSlip=false
+- อ่านเลขธุรกรรม/เลขอ้างอิง (transRef) ทุกตัวให้ครบ ห้ามเอาเลขบัญชีหรือวันเวลามาใส่แทน
+- แยกเลขบัญชีผู้รับที่มองเห็นเป็นเลขขึ้นต้นและเลขท้าย หากเห็นเฉพาะเลขท้ายให้ receiverAccountPrefix เป็นค่าว่าง
+- ห้ามเดาตัวเลขที่ถูกปิดบังด้วย x, X, *, จุด หรือขีด ให้เก็บเฉพาะตัวเลขที่มองเห็นจริง
 - ตรวจ: ตัวเลขคมชัดหรือเบลอผิดปกติ, font ไม่ตรงกับธนาคาร, ขอบภาพตัดต่อ, โลโก้ผิด
 - ถ้ามีสิ่งผิดปกติ suspicious=true พร้อมเหตุผลใน reason
 - confidence: high=ชัดเจน, medium=ไม่แน่ใจบาง field, low=คุณภาพต่ำ
@@ -248,6 +255,191 @@ export async function verifyWithAIVision(imageBuffer: Buffer): Promise<AIVisionR
   }
 }
 
+export type ReceivingAccount = {
+  bank?: string;
+  accountName?: string;
+  accountNumber?: string;
+};
+
+export type ReceiverEvidence = {
+  bank?: string;
+  accountName?: string;
+  accountRaw?: string;
+  accountPrefix?: string;
+  accountSuffix?: string;
+};
+
+export type AccountCheckStatus = 'match' | 'mismatch' | 'unknown' | 'unconfigured';
+
+export type AccountCheckResult = {
+  status: AccountCheckStatus;
+  matchedAccount?: ReceivingAccount;
+  observedPrefix: string;
+  observedSuffix: string;
+  observedDigits: string;
+  reason: string;
+};
+
+function normalizeText(value?: string): string {
+  return (value || '').toLowerCase().replace(/[^ก-๙຀-໿a-z0-9]/g, '');
+}
+
+function normalizeDigits(value?: string): string {
+  return (value || '').replace(/\D/g, '');
+}
+
+function normalizeBank(value?: string): string {
+  const normalized = normalizeText(value);
+  if (!normalized) return '';
+  const aliases: Array<[string, string[]]> = [
+    ['bcel', ['bcel', 'ธนาคารการค้าต่างประเทศลาว', 'ທະນາຄານການຄ້າຕ່າງປະເທດລາວ', 'ທຄຕລ']],
+    ['jdb', ['jdb', 'ธนาคารร่วมพัฒนา', 'ທະນາຄານຮ່ວມພັດທະນາ']],
+    ['ldb', ['ldb', 'ธนาคารพัฒนาลาว', 'ທະນາຄານພັດທະນາລາວ']],
+    ['apb', ['apb', 'ธนาคารส่งเสริมกสิกรรม', 'ທະນາຄານສົ່ງເສີມກະສິກຳ']],
+    ['kbank', ['kbank', 'กสิกร', 'kasikorn']],
+    ['scb', ['scb', 'ไทยพาณิชย์', 'siamcommercial']],
+    ['ktb', ['ktb', 'กรุงไทย', 'krungthai']],
+    ['bbl', ['bbl', 'กรุงเทพ', 'bangkokbank']],
+    ['bay', ['bay', 'กรุงศรี', 'krungsri']],
+  ];
+  for (const [canonical, values] of aliases) {
+    if (values.some(alias => normalized.includes(normalizeText(alias)))) return canonical;
+  }
+  return normalized;
+}
+
+function textMatches(expected?: string, actual?: string): boolean | null {
+  const e = normalizeText(expected);
+  const a = normalizeText(actual);
+  if (!e) return true;
+  if (!a) return null;
+  return e.includes(a) || a.includes(e);
+}
+
+function bankMatches(expected?: string, actual?: string): boolean | null {
+  const e = normalizeBank(expected);
+  const a = normalizeBank(actual);
+  if (!e) return true;
+  if (!a) return null;
+  return e === a || e.includes(a) || a.includes(e);
+}
+
+function visibleAccountParts(evidence: ReceiverEvidence): {
+  full: string;
+  prefix: string;
+  suffix: string;
+  digits: string;
+} {
+  const raw = evidence.accountRaw || '';
+  const explicitPrefix = normalizeDigits(evidence.accountPrefix);
+  const explicitSuffix = normalizeDigits(evidence.accountSuffix);
+  const digits = normalizeDigits(raw);
+  const hasMask = /[xX*•●]/.test(raw);
+  let prefix = explicitPrefix;
+  let suffix = explicitSuffix;
+  let full = '';
+
+  if (!hasMask && digits.length >= 6) {
+    full = digits;
+  } else if (hasMask) {
+    const firstMask = raw.search(/[xX*•●]/);
+    const lastMask = Math.max(
+      raw.lastIndexOf('x'),
+      raw.lastIndexOf('X'),
+      raw.lastIndexOf('*'),
+      raw.lastIndexOf('•'),
+      raw.lastIndexOf('●'),
+    );
+    if (!prefix && firstMask >= 0) prefix = normalizeDigits(raw.slice(0, firstMask));
+    if (!suffix && lastMask >= 0) suffix = normalizeDigits(raw.slice(lastMask + 1));
+  } else if (!suffix && digits.length >= 4) {
+    // Some banks/API providers expose only the last four digits without a mask.
+    suffix = digits;
+  }
+
+  if (full) {
+    if (!prefix) prefix = full.slice(0, Math.min(4, full.length));
+    if (!suffix) suffix = full.slice(-Math.min(4, full.length));
+  }
+  return { full, prefix, suffix, digits };
+}
+
+function accountNumberMatches(expectedValue: string | undefined, parts: ReturnType<typeof visibleAccountParts>): boolean | null {
+  const expected = normalizeDigits(expectedValue);
+  if (!expected) return true;
+  if (parts.full) return parts.full === expected;
+  if (parts.prefix.length >= 2 && parts.suffix.length >= 2) {
+    return expected.startsWith(parts.prefix) && expected.endsWith(parts.suffix);
+  }
+  if (parts.suffix.length >= 4) return expected.endsWith(parts.suffix);
+  if (parts.prefix.length >= 4) return expected.startsWith(parts.prefix);
+  return null;
+}
+
+/**
+ * Fail closed: a slip is only considered tied to the shop when the configured
+ * bank/account evidence is strong enough. Missing or unreadable evidence is
+ * "unknown", never an automatic pass.
+ */
+export function checkReceivingAccount(
+  configuredAccounts: ReceivingAccount[],
+  evidence: ReceiverEvidence,
+): AccountCheckResult {
+  const parts = visibleAccountParts(evidence);
+  if (!configuredAccounts.length) {
+    return {
+      status: 'unconfigured',
+      observedPrefix: parts.prefix,
+      observedSuffix: parts.suffix,
+      observedDigits: parts.digits,
+      reason: 'no receiving account configured',
+    };
+  }
+
+  let hasNonMismatchCandidate = false;
+  for (const account of configuredAccounts) {
+    const bank = bankMatches(account.bank, evidence.bank);
+    const number = accountNumberMatches(account.accountNumber, parts);
+    const name = textMatches(account.accountName, evidence.accountName);
+    const hasExpectedNumber = !!normalizeDigits(account.accountNumber);
+    const numberIsStrong = hasExpectedNumber ? number !== null : true;
+    const bankIsStrong = account.bank ? bank !== null : true;
+    const identityMatches = hasExpectedNumber
+      ? number === true
+      : (!!normalizeText(account.accountName) && name === true);
+
+    if (bank === true && identityMatches && name !== false && numberIsStrong && bankIsStrong) {
+      return {
+        status: 'match',
+        matchedAccount: account,
+        observedPrefix: parts.prefix,
+        observedSuffix: parts.suffix,
+        observedDigits: parts.digits,
+        reason: 'bank and visible account digits match',
+      };
+    }
+
+    const conclusiveMismatch = bank === false
+      || number === false
+      || (bank === true && name === false && number !== true);
+    if (!conclusiveMismatch) hasNonMismatchCandidate = true;
+  }
+
+  return {
+    status: hasNonMismatchCandidate ? 'unknown' : 'mismatch',
+    observedPrefix: parts.prefix,
+    observedSuffix: parts.suffix,
+    observedDigits: parts.digits,
+    reason: hasNonMismatchCandidate
+      ? 'receiver account evidence is incomplete or unreadable'
+      : 'receiver bank/name/account digits do not match configured accounts',
+  };
+}
+
+function normalizeTransactionRef(value?: string): string {
+  return (value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // 6. Main Orchestrator — verifySlip
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -271,6 +463,11 @@ export interface VerifySlipResult {
   bankFrom?: string;
   bankTo?: string;
   transRef?: string;
+  receiverName?: string;
+  receiverAccount?: string;
+  receiverAccountPrefix?: string;
+  receiverAccountSuffix?: string;
+  accountCheck?: AccountCheckStatus;
   message: string; // message to send to customer
   record?: any; // saved DB record
   imagePath?: string; // ที่อยู่ไฟล์รูปที่ดาวน์โหลดไว้ (ใช้ต่อกับ AI Vision กรณีไม่ใช่สลิป)
@@ -345,7 +542,7 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
   const aiResult = await verifyWithAIVision(buffer);
 
   // ── Step 5: Determine final verdict ─────────────────────────────────────
-  let status: 'verified' | 'fake' | 'not_slip' | 'error' | 'pending' = 'error';
+  let status: 'verified' | 'fake' | 'duplicate' | 'not_slip' | 'error' | 'pending' = 'error';
   let verifiedBy = 'auto';
   let finalAmount = slipok.amount || aiResult.amount;
   let finalBankFrom = bankName(slipok.sendingBank) || aiResult.bankFrom || '';
@@ -354,7 +551,7 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
   let message = '';
 
   // Account allow-list is configured per company in WhatsApp AI settings.
-  let configuredAccounts: Array<{ bank?: string; accountName?: string; accountNumber?: string }> = [];
+  let configuredAccounts: ReceivingAccount[] = [];
   if (opts.companyId) {
     const config = await prisma.botConfig.findFirst({
       where: { companyId: opts.companyId, channel: 'whatsapp' },
@@ -365,43 +562,66 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
       if (Array.isArray(metadata.receivingAccounts)) configuredAccounts = metadata.receivingAccounts;
     } catch { configuredAccounts = []; }
   }
-  const normalizeText = (value?: string) => (value || '').toLowerCase().replace(/[^ก-๙຀-໿a-z0-9]/g, '');
-  const normalizeDigits = (value?: string) => (value || '').replace(/\D/g, '');
   const receiverName = slipok.receiverName || aiResult.receiverName || '';
   const receiverAccount = slipok.receiverAccount || aiResult.receiverAccount || '';
-  const accountMatches = configuredAccounts.length === 0 || configuredAccounts.some(account => {
-    const expectedBank = normalizeText(account.bank);
-    const actualBank = normalizeText(finalBankTo);
-    const expectedName = normalizeText(account.accountName);
-    const actualName = normalizeText(receiverName);
-    const expectedNumber = normalizeDigits(account.accountNumber);
-    const actualNumber = normalizeDigits(receiverAccount);
-    const bankMatches = !expectedBank || actualBank.includes(expectedBank) || expectedBank.includes(actualBank);
-    const nameMatches = !expectedName || actualName.includes(expectedName) || expectedName.includes(actualName);
-    const numberMatches = !expectedNumber || !actualNumber
-      ? !expectedNumber
-      : expectedNumber.endsWith(actualNumber) || actualNumber.endsWith(expectedNumber);
-    return bankMatches && nameMatches && numberMatches;
+  const accountCheck = checkReceivingAccount(configuredAccounts, {
+    bank: finalBankTo,
+    accountName: receiverName,
+    accountRaw: receiverAccount,
+    accountPrefix: slipok.receiverAccount ? undefined : aiResult.receiverAccountPrefix,
+    accountSuffix: slipok.receiverAccount ? undefined : aiResult.receiverAccountSuffix,
   });
-  const accountMismatch = configuredAccounts.length > 0 && !accountMatches;
+  const accountMismatch = accountCheck.status === 'mismatch';
+  const normalizedTransRef = normalizeTransactionRef(finalTransRef);
+  if (normalizedTransRef) finalTransRef = normalizedTransRef;
 
-  if (slipok.success && accountMismatch) {
+  // A transaction reference catches the same transfer even when the customer
+  // crops, recompresses, or screenshots the slip so the image hash changes.
+  let transactionDuplicate: any = null;
+  if (normalizedTransRef.length >= 6) {
+    const recentRefs = await prisma.slipVerification.findMany({
+      where: { tenantId, transRef: { not: null } },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
+    transactionDuplicate = recentRefs.find(item =>
+      normalizeTransactionRef(item.transRef || '') === normalizedTransRef
+    ) || null;
+  }
+
+  const isSlipEvidence = slipok.success || (aiResult.success && aiResult.isSlip);
+  const pendingAccountMessage = language === 'lo'
+    ? '🧾 ໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ລະບົບຍັງອ່ານບັນຊີຜູ້ຮັບບໍ່ຄົບ ແອດມິນຈະກວດສອບໃຫ້'
+    : '🧾 ได้รับสลิปแล้วค่ะ ระบบยังอ่านบัญชีผู้รับได้ไม่ครบ เจ้าหน้าที่จะตรวจสอบให้นะคะ';
+
+  if (isSlipEvidence && accountMismatch) {
     status = 'fake';
     verifiedBy = 'auto';
     message = language === 'lo'
-      ? 'ບັນຊີປາຍທາງໃນສະລິບບໍ່ກົງກັບບັນຊີຂອງຮ້ານເຈົ້າ ລົບກວນກວດສອບກ່ອນສົ່ງໃໝ່'
-      : 'บัญชีปลายทางในสลิปไม่ตรงกับบัญชีของร้านครับ รบกวนตรวจสอบก่อนส่งใหม่ครับ';
+      ? 'ບິນທີ່ລູກຄ້າສົ່ງມາບໍ່ແມ່ນບັນຊີຮ້ານເຮົາເດີ້'
+      : 'สลิปที่ลูกค้าส่งมาไม่ใช่บัญชีของร้านเราค่ะ';
+  } else if (isSlipEvidence && transactionDuplicate) {
+    status = 'duplicate';
+    verifiedBy = 'auto';
+    message = language === 'lo'
+      ? 'ສະລິບນີ້ມີເລກທຸລະກຳຊ້ຳກັບທີ່ເຄີຍສົ່ງມາແລ້ວເຈົ້າ ລົບກວນຢ່າສົ່ງສະລິບເກົ່າຊ້ຳ'
+      : 'สลิปนี้มีเลขธุรกรรมซ้ำกับที่เคยส่งมาแล้วค่ะ กรุณาอย่าส่งสลิปเก่าซ้ำนะคะ';
   } else if (slipok.success) {
-    // SlipOK ยืนยันได้ → เชื่อถือสูง
-    status = 'verified';
-    verifiedBy = 'slipok';
-
-    if (aiResult.suspicious) {
-      // SlipOK OK แต่ AI สงสัย → ยังถือว่าผ่านแต่แจ้ง admin
+    // SlipOK only proves that the transfer record is readable. The shop
+    // account, transaction reference, and AI tamper check must also pass.
+    if (accountCheck.status !== 'match') {
+      status = 'pending';
+      verifiedBy = 'slipok';
+      message = pendingAccountMessage;
+    } else if (!normalizedTransRef || aiResult.suspicious || aiResult.confidence === 'low') {
+      status = 'pending';
+      verifiedBy = 'slipok';
       message = language === 'lo'
-        ? `✅ ສະລິບຜ່ານການກວດສອບແລ້ວເຈົ້າ\n💰 ${finalAmount?.toLocaleString() || '?'}\n🏦 ${finalBankFrom} → ${finalBankTo}\n🔖 Ref: ${finalTransRef}`
-        : `✅ สลิปผ่านการตรวจสอบแล้วค่ะ\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}\n🔖 Ref: ${finalTransRef}`;
+        ? `🧾 ໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ຕ້ອງໃຫ້ແອດມິນຢືນຢັນເພີ່ມ\n💰 ${finalAmount?.toLocaleString() || '?'}\n🏦 ${finalBankFrom} → ${finalBankTo}`
+        : `🧾 ได้รับสลิปแล้วค่ะ ต้องให้เจ้าหน้าที่ยืนยันเพิ่มเติม\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}`;
     } else {
+      status = 'verified';
+      verifiedBy = 'slipok';
       message = language === 'lo'
         ? `✅ ສະລິບຜ່ານການກວດສອບແລ້ວເຈົ້າ\n💰 ${finalAmount?.toLocaleString() || '?'}\n🏦 ${finalBankFrom} → ${finalBankTo}\n🔖 Ref: ${finalTransRef}`
         : `✅ สลิปผ่านการตรวจสอบแล้วค่ะ\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}\n🔖 Ref: ${finalTransRef}`;
@@ -414,7 +634,7 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
       message = '';
     } else if (aiResult.suspicious) {
       // AI คิดว่าน่าสงสัย
-      status = 'fake';
+      status = 'pending';
       verifiedBy = 'ai';
       message = language === 'lo'
         ? 'ແອດມິນໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ກຳລັງກວດສອບລາຍລະອຽດເພີ່ມເຕີມໃຫ້'
@@ -427,7 +647,7 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
       finalBankFrom = aiResult.bankFrom || '';
       finalBankTo = aiResult.bankTo || '';
       message = language === 'lo'
-        ? `✅ ສະລິບຜ່ານການກວດສອບແລ້ວເຈົ້າ\n💰 ${finalAmount?.toLocaleString() || '?'}\n🏦 ${finalBankFrom} → ${finalBankTo}`
+        ? `🧾 ໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ລໍຖ້າແອດມິນຢືນຢັນ\n💰 ${finalAmount?.toLocaleString() || '?'}\n🏦 ${finalBankFrom} → ${finalBankTo}`
         : `ได้รับสลิปแล้วครับ ระบบกำลังตรวจสอบให้ครับ\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}`;
       if (aiResult.confidence === 'low') {
         message += language === 'lo'
@@ -452,7 +672,7 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
 
       // SlipOK
       slipokSuccess: slipok.success || null,
-      transRef: slipok.transRef, sendingBank: slipok.sendingBank,
+      transRef: finalTransRef || undefined, sendingBank: slipok.sendingBank,
       receivingBank: slipok.receivingBank, amount: slipok.amount,
       transDate: slipok.transDate, transTime: slipok.transTime,
       senderName: slipok.senderName, receiverName: slipok.receiverName,
@@ -467,8 +687,16 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
 
       // Final
       status, verifiedBy,
-      isDuplicate: false,
-      notes: accountMismatch ? `ACCOUNT_MISMATCH receiver=${receiverName} account=${receiverAccount} bank=${finalBankTo}` : undefined,
+      isDuplicate: status === 'duplicate',
+      duplicateOfId: status === 'duplicate' ? transactionDuplicate?.id : undefined,
+      notes: JSON.stringify({
+        accountCheck: accountCheck.status,
+        accountReason: accountCheck.reason,
+        receiverName,
+        receiverAccount,
+        receiverAccountPrefix: accountCheck.observedPrefix,
+        receiverAccountSuffix: accountCheck.observedSuffix,
+      }),
     },
   });
 
@@ -485,7 +713,13 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
     status, // ⚠️ คงค่า not_slip ไว้ (เดิม map เป็น 'fake' → รูปทั่วไปถูกตอบว่า "สลิปไม่ผ่าน")
     verifiedBy, amount: finalAmount,
     bankFrom: finalBankFrom, bankTo: finalBankTo,
-    transRef: finalTransRef, message, record,
+    transRef: finalTransRef,
+    receiverName,
+    receiverAccount,
+    receiverAccountPrefix: accountCheck.observedPrefix,
+    receiverAccountSuffix: accountCheck.observedSuffix,
+    accountCheck: accountCheck.status,
+    message, record,
     imagePath: filePath,
   };
 }

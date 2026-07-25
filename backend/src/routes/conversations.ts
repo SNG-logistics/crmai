@@ -320,9 +320,45 @@ router.get('/:id', async (req: Request, res: Response) => {
     // company scope: แอดมินที่ถูกจำกัดต้องเข้าถึงบริษัทของบทสนทนานี้ได้
     const allowed = await getUserCompanyIds(req.user!.id);
     if (!canAccessCompany(allowed, conversation.companyId)) return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์เข้าถึงบทสนทนาของบริษัทนี้' });
+    // Attach current slip state to the related chat bubble. WhatsApp originally
+    // stored the image message before verification finished, so older messages
+    // have no slip metadata unless we enrich them here.
+    const slipRecords = await prisma.slipVerification.findMany({
+      where: { tenantId: req.tenantId!, conversationId: conversation.id },
+      orderBy: { createdAt: 'desc' },
+    });
+    const slipsById = new Map(slipRecords.map(slip => [slip.id, slip]));
+    const slipsByMessageId = new Map(slipRecords.map(slip => [slip.messageId, slip]));
+    const enrichedMessages = conversation.messages.map(message => {
+      let metadata: any = {};
+      try { metadata = JSON.parse(message.metadata || '{}'); } catch { metadata = {}; }
+      const existingRecordId = metadata?.slipVerification?.recordId;
+      const slip = (existingRecordId ? slipsById.get(existingRecordId) : undefined)
+        || (message.platformMsgId ? slipsByMessageId.get(message.platformMsgId) : undefined)
+        || slipsByMessageId.get(message.id);
+      if (!slip) return message;
+      let notes: any = {};
+      try { notes = JSON.parse(slip.notes || '{}'); } catch { notes = {}; }
+      metadata.slipVerification = {
+        ...metadata.slipVerification,
+        status: slip.status,
+        verifiedBy: slip.verifiedBy,
+        amount: slip.amount ?? slip.aiAmount,
+        bankFrom: slip.sendingBank || slip.aiBankFrom,
+        bankTo: slip.receivingBank || slip.aiBankTo,
+        transRef: slip.transRef,
+        receiverName: slip.receiverName || notes.receiverName,
+        receiverAccount: notes.receiverAccount,
+        receiverAccountPrefix: notes.receiverAccountPrefix,
+        receiverAccountSuffix: notes.receiverAccountSuffix,
+        accountCheck: notes.accountCheck,
+        recordId: slip.id,
+      };
+      return { ...message, metadata: JSON.stringify(metadata) };
+    });
     // Mark messages as read
     await prisma.message.updateMany({ where: { conversationId: req.params.id, isRead: false, senderType: 'customer' }, data: { isRead: true } });
-    res.json({ success: true, conversation });
+    res.json({ success: true, conversation: { ...conversation, messages: enrichedMessages } });
   } catch (err) {
     res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' });
   }

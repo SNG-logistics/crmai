@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
+import { emitToTenant } from '../lib/socket';
 
 const router = Router();
 router.use(verifyToken);
@@ -73,6 +74,10 @@ router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const tenantId = (req as any).user.tenantId;
     const { status, notes } = req.body;
+    const allowedStatuses = new Set(['pending', 'verified', 'fake']);
+    if (status !== undefined && !allowedStatuses.has(status)) {
+      return res.status(400).json({ message: 'Invalid slip status' });
+    }
 
     const existing = await prisma.slipVerification.findFirst({
       where: { id: req.params.id, tenantId },
@@ -87,6 +92,12 @@ router.patch('/:id', async (req: Request, res: Response) => {
       },
     });
 
+    emitToTenant(tenantId, 'conversation_updated', {
+      id: existing.conversationId,
+      conversationId: existing.conversationId,
+      slipId: updated.id,
+      slipStatus: updated.status,
+    });
     res.json(updated);
   } catch (err: any) {
     console.error('[Slips] Override error:', err);

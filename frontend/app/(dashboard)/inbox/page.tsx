@@ -211,6 +211,9 @@ const TONE_META: Record<string, { label: string; color: string }> = {
 
 // ─── Slip Verification Badge ─────────────────────────────────────────────────
 function SlipBadge({ data }: { data: any }) {
+  const [current, setCurrent] = useState(data || {});
+  const [updating, setUpdating] = useState(false);
+  useEffect(() => { setCurrent(data || {}); }, [data]);
   if (!data) return null;
 
   const STATUS_MAP: Record<string, { icon: string; label: string; color: string; bg: string; border: string }> = {
@@ -222,8 +225,26 @@ function SlipBadge({ data }: { data: any }) {
     pending:   { icon: '⏳', label: 'กำลังตรวจสอบ', color: '#6B7280', bg: 'rgba(107,114,128,0.08)', border: 'rgba(107,114,128,0.25)' },
   };
 
-  const s = STATUS_MAP[data.status] || STATUS_MAP.pending;
+  const s = STATUS_MAP[current.status] || STATUS_MAP.pending;
   const VERIFY_MAP: Record<string, string> = { slipok: 'SlipOK', ai: 'AI Vision', manual: 'Manual', auto: 'Auto' };
+  const updateStatus = async (status: 'verified' | 'fake') => {
+    if (!current.recordId || updating) return;
+    setUpdating(true);
+    const toastId = toast.loading(status === 'verified' ? 'กำลังยืนยันสลิป...' : 'กำลังบันทึกว่าไม่ผ่าน...');
+    try {
+      const response = await api.patch(`/slips/${current.recordId}`, { status });
+      setCurrent((previous: any) => ({
+        ...previous,
+        status: response.data.status,
+        verifiedBy: response.data.verifiedBy,
+      }));
+      toast.success(status === 'verified' ? '✅ ยืนยันสลิปแล้ว' : '❌ บันทึกว่าสลิปไม่ผ่านแล้ว', { id: toastId });
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'อัปเดตสลิปไม่สำเร็จ', { id: toastId });
+    } finally {
+      setUpdating(false);
+    }
+  };
 
   return (
     <div style={{
@@ -234,24 +255,53 @@ function SlipBadge({ data }: { data: any }) {
       <div style={{ fontWeight: 700, color: s.color, marginBottom: 2 }}>
         {s.icon} {s.label}
       </div>
-      {data.amount && (
+      {current.amount && (
         <div style={{ color: 'var(--text-secondary)' }}>
-          💰 {Number(data.amount).toLocaleString()} บาท
+          💰 {Number(current.amount).toLocaleString()} บาท
         </div>
       )}
-      {(data.bankFrom || data.bankTo) && (
+      {(current.bankFrom || current.bankTo) && (
         <div style={{ color: 'var(--text-secondary)' }}>
-          🏦 {data.bankFrom || '?'} → {data.bankTo || '?'}
+          🏦 {current.bankFrom || '?'} → {current.bankTo || '?'}
         </div>
       )}
-      {data.transRef && (
+      {(current.receiverAccountPrefix || current.receiverAccountSuffix) && (
+        <div style={{ color: 'var(--text-secondary)' }}>
+          💳 บัญชีผู้รับ: {current.receiverAccountPrefix || '•••'}••••{current.receiverAccountSuffix || '•••'}
+        </div>
+      )}
+      {current.transRef && (
         <div style={{ color: 'var(--text-muted)' }}>
-          🔖 Ref: {data.transRef}
+          🔖 เลขธุรกรรม: {current.transRef}
         </div>
       )}
       <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem', marginTop: 2 }}>
-        🔍 {VERIFY_MAP[data.verifiedBy] || data.verifiedBy}
+        🔍 {VERIFY_MAP[current.verifiedBy] || current.verifiedBy}
       </div>
+      {current.recordId && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 7 }}>
+          {current.status !== 'verified' && (
+            <button
+              type="button"
+              disabled={updating}
+              onClick={() => updateStatus('verified')}
+              style={{ flex: 1, border: '1px solid rgba(16,185,129,.4)', background: 'rgba(16,185,129,.14)', color: '#10B981', borderRadius: 7, padding: '5px 7px', cursor: updating ? 'wait' : 'pointer', fontFamily: 'inherit', fontSize: '0.7rem', fontWeight: 700 }}
+            >
+              ✅ ยืนยันสลิป
+            </button>
+          )}
+          {current.status !== 'fake' && (
+            <button
+              type="button"
+              disabled={updating}
+              onClick={() => updateStatus('fake')}
+              style={{ flex: 1, border: '1px solid rgba(239,68,68,.4)', background: 'rgba(239,68,68,.1)', color: '#EF4444', borderRadius: 7, padding: '5px 7px', cursor: updating ? 'wait' : 'pointer', fontFamily: 'inherit', fontSize: '0.7rem', fontWeight: 700 }}
+            >
+              ❌ ไม่ผ่าน
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

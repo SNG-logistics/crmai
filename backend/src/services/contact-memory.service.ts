@@ -107,6 +107,64 @@ export function mightContainCustomerInfo(text: string): boolean {
   return true;
 }
 
+function labeledValue(text: string, label: RegExp): string | undefined {
+  const lines = (text || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i].match(label);
+    if (!match) continue;
+    const sameLine = lines[i]
+      .slice((match.index || 0) + match[0].length)
+      .replace(/^[\s:：=\-–—]+/, '')
+      .trim();
+    if (sameLine) return sameLine;
+    const nextLine = lines[i + 1]?.replace(/^[\s:：=\-–—]+/, '').trim();
+    if (nextLine && !/[:：]$/.test(nextLine)) return nextLine;
+  }
+  return undefined;
+}
+
+/**
+ * Deterministic fallback for the common registration form pasted into chat.
+ * This keeps customer data capture working even when the extraction model is
+ * temporarily unavailable or returns invalid JSON.
+ */
+export function extractStructuredCustomerInfo(text: string): CrmProfile {
+  const fullName = labeledValue(
+    text,
+    /(?:ชื่อ\s*(?:-|–|—)?\s*นามสกุล|ชื่อ\s*[-–—]?\s*สกุล|ຊື່\s*(?:-|–|—)?\s*ນາມສະກຸນ)/i,
+  );
+  const phoneRaw = labeledValue(
+    text,
+    /(?:เบอร์(?:โทรศัพท์|โทร)?(?:ที่ใช้สมัครสมาชิก)?|โทรศัพท์|ເບີໂທ(?:ທີ່ໃຊ້ສະໝັກ)?)/i,
+  );
+  const bankName = labeledValue(
+    text,
+    /^(?:[✅✔☑•*_-]\s*)?(?:ธนาคาร|ທະນາຄານ)(?!\s*(?:บัญชี|ບັນຊີ))/i,
+  );
+  const bankAccountRaw = labeledValue(
+    text,
+    /(?:เลข\s*บัญชี(?:ธนาคาร)?|บัญชีธนาคาร|ເລກ\s*ບັນຊີ(?:ທະນາຄານ)?)/i,
+  );
+  const gameUsername = labeledValue(
+    text,
+    /(?:ยูสเซอร์(?:เนม)?|ยูสเกม|ชื่อผู้ใช้|username|user\s*id|ຢູສເຊີ|ຊື່ຜູ້ໃຊ້)/i,
+  );
+  const phone = (phoneRaw || '').replace(/[^\d+]/g, '');
+  const bankAccount = (bankAccountRaw || '').replace(/\D/g, '');
+  const cleanValue = (value?: string, max = 120) => {
+    const cleaned = (value || '').trim().slice(0, max);
+    return cleaned && !/^(?:-|ไม่มี|ບໍ່ມີ)$/i.test(cleaned) ? cleaned : undefined;
+  };
+
+  return {
+    fullName: cleanValue(fullName),
+    phone: phone.replace(/\D/g, '').length >= 7 ? phone : undefined,
+    bankName: cleanValue(bankName, 80),
+    bankAccount: bankAccount.length >= 6 ? bankAccount : undefined,
+    gameUsername: cleanValue(gameUsername, 100),
+  };
+}
+
 // ─── สกัดข้อมูลจากบทสนทนาล่าสุดด้วย AI แล้วบันทึก ────────────────────────────
 export async function captureCustomerInfo(opts: {
   tenantId: string;
@@ -125,19 +183,29 @@ export async function captureCustomerInfo(opts: {
     const convo = recentMessages.slice(-6)
       .map(m => `${m.role === 'user' ? 'ลูกค้า' : 'แอดมิน'}: ${m.content}`)
       .join('\n');
-
-    const raw = await generateAIResponse([
-      {
-        role: 'system',
-        content: `สกัดข้อมูลส่วนตัวของ "ลูกค้า" จากบทสนทนา ตอบ JSON เท่านั้น:
-{"fullName":"ชื่อ-นามสกุลจริง หรือ null","phone":"เบอร์โทร (ตัวเลขล้วน) หรือ null","bankName":"ชื่อธนาคาร หรือ null","bankAccount":"เลขบัญชี (ตัวเลขล้วน) หรือ null","gameUsername":"ยูสเซอร์เนม หรือ null"}
-กฎ: เอาเฉพาะข้อมูลที่ลูกค้าพิมพ์เอง ห้ามเดา ห้ามเอาชื่อ LINE display มาเป็น fullName ถ้าไม่มีให้ใส่ null`,
-      },
-      { role: 'user', content: convo },
-    ], process.env.COMETAPI_LIGHT_MODEL || 'gpt-4o-mini', 0.1, 200);
+    const deterministic = extractStructuredCustomerInfo(
+      recentMessages.filter(message => message.role === 'user').slice(-6).map(message => message.content).join('\n'),
+    );
 
     let parsed: any = {};
-    try { parsed = JSON.parse(raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()); } catch { return null; }
+    try {
+      const raw = await generateAIResponse([
+        {
+          role: 'system',
+          content: `สกัดข้อมูลส่วนตัวของ "ลูกค้า" จากบทสนทนา ตอบ JSON เท่านั้น:
+{"fullName":"ชื่อ-นามสกุลจริง หรือ null","phone":"เบอร์โทร (ตัวเลขล้วน) หรือ null","bankName":"ชื่อธนาคาร หรือ null","bankAccount":"เลขบัญชี (ตัวเลขล้วน) หรือ null","gameUsername":"ยูสเซอร์เนม หรือ null"}
+กฎ: เอาเฉพาะข้อมูลที่ลูกค้าพิมพ์เอง ห้ามเดา ห้ามเอาชื่อ LINE display มาเป็น fullName ถ้าไม่มีให้ใส่ null`,
+        },
+        { role: 'user', content: convo },
+      ], process.env.COMETAPI_LIGHT_MODEL || 'gpt-4o-mini', 0.1, 200);
+      try {
+        parsed = JSON.parse(raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim());
+      } catch {
+        console.warn('[ContactMemory] AI returned invalid JSON; using deterministic registration parser');
+      }
+    } catch (error: any) {
+      console.warn('[ContactMemory] AI extraction unavailable; using deterministic registration parser:', error.message);
+    }
 
     const clean = (v: any, maxLength: number) => {
       if (!v || typeof v !== 'string') return undefined;
@@ -148,11 +216,11 @@ export async function captureCustomerInfo(opts: {
     const phone = clean(parsed.phone, 24)?.replace(/[^\d+]/g, '');
     const bankAccount = clean(parsed.bankAccount, 40)?.replace(/[^\d]/g, '');
     const found: CrmProfile = {
-      fullName: clean(parsed.fullName, 120),
-      phone: phone && phone.replace(/\D/g, '').length >= 7 ? phone : undefined,
-      bankName: clean(parsed.bankName, 80),
-      bankAccount: bankAccount && bankAccount.length >= 6 ? bankAccount : undefined,
-      gameUsername: clean(parsed.gameUsername, 100),
+      fullName: deterministic.fullName || clean(parsed.fullName, 120),
+      phone: deterministic.phone || (phone && phone.replace(/\D/g, '').length >= 7 ? phone : undefined),
+      bankName: deterministic.bankName || clean(parsed.bankName, 80),
+      bankAccount: deterministic.bankAccount || (bankAccount && bankAccount.length >= 6 ? bankAccount : undefined),
+      gameUsername: deterministic.gameUsername || clean(parsed.gameUsername, 100),
     };
     // ไม่เจออะไรใหม่เลย → จบ
     if (!found.fullName && !found.phone && !found.bankName && !found.bankAccount && !found.gameUsername) return null;
@@ -168,7 +236,7 @@ export async function captureCustomerInfo(opts: {
     let snapshotChanged = false;
     if (changed) merged.updatedAt = new Date().toISOString();
     cf.crm_profile = merged;
-    if (registrationFlow) {
+    if (registrationFlow || REGISTER_FIELDS.filter(field => found[field.key]).length >= 2) {
       const now = new Date().toISOString();
       const snapshot: RegistrationSnapshot = cf.registration_snapshot && typeof cf.registration_snapshot === 'object'
         ? { ...cf.registration_snapshot }

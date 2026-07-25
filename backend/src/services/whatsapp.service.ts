@@ -260,7 +260,15 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
       return;
     }
 
-    const history = await prisma.message.findMany({ where: { conversationId }, orderBy: { createdAt: 'asc' }, take: 15 });
+    // Fetch the latest messages, not the first messages ever sent in the room.
+    // The old ascending + take query silently dropped new registration details
+    // once a conversation had more than 15 messages.
+    const recentDescending = await prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+    const history = recentDescending.reverse();
     const conversationHistory = history.map((m: any) => ({
       role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const,
       content: m.content,
@@ -418,6 +426,20 @@ async function processWhatsAppImage(
     let metadata: any = {};
     try { metadata = JSON.parse(original?.metadata || '{}'); } catch { metadata = {}; }
     metadata.aiImageAnalysis = imageAnalysis;
+    metadata.slipVerification = {
+      status: slip.status,
+      verifiedBy: slip.verifiedBy,
+      amount: slip.amount,
+      bankFrom: slip.bankFrom,
+      bankTo: slip.bankTo,
+      transRef: slip.transRef,
+      receiverName: slip.receiverName,
+      receiverAccount: slip.receiverAccount,
+      receiverAccountPrefix: slip.receiverAccountPrefix,
+      receiverAccountSuffix: slip.receiverAccountSuffix,
+      accountCheck: slip.accountCheck,
+      recordId: slip.record?.id,
+    };
     await prisma.message.update({ where: { id: dbMessageId }, data: { metadata: JSON.stringify(metadata) } });
 
     if (!reply) {
