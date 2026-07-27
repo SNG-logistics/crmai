@@ -17,9 +17,9 @@ type StoredCustomerGameCredentials = {
 };
 
 const USER_LABEL =
-  String.raw`(?:username|user\s*(?:name|id)?|login|ยูสเซอร์(?:เนม)?|ยูสเกม|ชื่อผู้ใช้|ยูส|ไอดี(?:เกม)?|ຢູສເຊີ(?:ເນມ)?|ຊື່ຜູ້ໃຊ້|ຢູສ)`;
+  String.raw`(?:username|user\s*(?:name|id)?|login|ยูส(?:เซอร์(?:เนม)?|เชอร์|เชี้|เกม)?|ชื่อผู้ใช้|ไอดี(?:เกม)?|ຢູສເຊີ(?:ເນມ)?|ຊື່ຜູ້ໃຊ້|ຢູສ)`;
 const PASSWORD_LABEL =
-  String.raw`(?:password|pass(?:word)?|pwd|pin|รหัส(?:ผ่าน|เข้า(?:เล่น|เกม)|เกม)?|พาสเวิร์ด|ລະຫັດ(?:ຜ່ານ|ເຂົ້າຫຼິ້ນ)?)`;
+  String.raw`(?:password|pass(?:word)?|pwd|pin|(?:รหัส|ระหัส|รหัด|ละหัด|ลหัส)(?:ผ่าน|เข้า(?:เล่น|เกม)|เกม)?|พาส(?:เวิร์ด)?|ລະຫັດ(?:ຜ່ານ|ເຂົ້າຫຼິ້ນ)?)`;
 
 function parseJson(value?: string | null): any {
   try { return JSON.parse(value || '{}'); } catch { return {}; }
