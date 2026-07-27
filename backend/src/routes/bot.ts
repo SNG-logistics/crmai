@@ -6,6 +6,7 @@ import { randomUUID } from 'crypto';
 import sharp from 'sharp';
 import prisma from '../lib/prisma';
 import { verifyToken } from '../middleware/auth';
+import { canAccessCompany, getUserCompanyIds } from '../lib/company-scope';
 import { analyzeKnowledgeImage, generateAIResponse, parseBotSettings, processBotMessage } from '../services/ai.service';
 import { KNOWLEDGE_FILE_EXTENSIONS, parseKnowledgeFile } from '../services/knowledge-file.service';
 const router = Router();
@@ -84,6 +85,23 @@ async function resolveCompanyId(req: Request): Promise<string> {
   return def.id;
 }
 
+async function resolveAccessibleCompanyId(req: Request): Promise<string | null> {
+  const requested = String(req.query.companyId || req.body?.companyId || '');
+  let companyId: string;
+  if (requested) {
+    const company = await prisma.company.findFirst({
+      where: { id: requested, tenantId: req.tenantId! },
+      select: { id: true },
+    });
+    if (!company) return null;
+    companyId = company.id;
+  } else {
+    companyId = await resolveCompanyId(req);
+  }
+  const allowed = await getUserCompanyIds(req.user!.id);
+  return canAccessCompany(allowed, companyId) ? companyId : null;
+}
+
 async function ensureBotConfig(tenantId: string, companyId: string, channel: BotChannel) {
   const existing = await prisma.botConfig.findFirst({ where: { companyId, channel } });
   if (existing) return existing;
@@ -142,7 +160,8 @@ async function ensureBotConfig(tenantId: string, companyId: string, channel: Bot
 
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const companyId = await resolveCompanyId(req);
+    const companyId = await resolveAccessibleCompanyId(req);
+    if (!companyId) return res.status(404).json({ success: false, message: 'Company not found' });
     const channel = resolveBotChannel(req);
     await ensureBotConfig(req.tenantId!, companyId, channel);
     const bot = await prisma.botConfig.findFirst({
@@ -156,14 +175,31 @@ router.get('/', async (req: Request, res: Response) => {
 router.put('/', async (req: Request, res: Response) => {
   try {
     const { systemPrompt, model, temperature, isActive, settings } = req.body;
-    const companyId = await resolveCompanyId(req);
+    let sanitizedSettings: Record<string, unknown> | undefined;
+    if (settings !== undefined) {
+      if (settings === null) {
+        sanitizedSettings = {};
+      } else if (typeof settings !== 'object' || Array.isArray(settings)) {
+        return res.status(400).json({ success: false, message: 'settings must be an object' });
+      } else {
+        if (Object.prototype.hasOwnProperty.call(settings, 'receivingAccounts')) {
+          return res.status(403).json({
+            success: false,
+            message: 'Use /api/bot/extended to change receiving accounts',
+          });
+        }
+        sanitizedSettings = { ...settings };
+      }
+    }
+    const companyId = await resolveAccessibleCompanyId(req);
+    if (!companyId) return res.status(404).json({ success: false, message: 'Company not found' });
     const channel = resolveBotChannel(req);
     const existing = await ensureBotConfig(req.tenantId!, companyId, channel);
     // merge metadata เดิมเสมอ เพื่อไม่ให้หน้า WhatsApp/AI เขียนค่าของอีกหน้าหาย
     let currentMetadata: any = {};
     try { currentMetadata = JSON.parse(existing?.metadata || '{}'); } catch { currentMetadata = {}; }
-    const metadata = settings !== undefined
-      ? JSON.stringify({ ...currentMetadata, ...(settings || {}) })
+    const metadata = sanitizedSettings !== undefined
+      ? JSON.stringify({ ...currentMetadata, ...sanitizedSettings })
       : undefined;
     const bot = await prisma.botConfig.update({
       where: { id: existing.id },
@@ -554,7 +590,17 @@ router.post('/auto-seed', async (req: Request, res: Response) => {
 router.put('/extended', async (req: Request, res: Response) => {
   try {
     const { welcomeMessage, quickReplies, handoffKeywords, whatsappLanguage, receivingAccounts } = req.body;
-    const companyId = await resolveCompanyId(req);
+    const companyId = await resolveAccessibleCompanyId(req);
+    if (!companyId) return res.status(404).json({ success: false, message: 'Company not found' });
+    if (
+      Array.isArray(receivingAccounts)
+      && !['admin', 'superadmin'].includes(req.user?.role || '')
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Only an administrator can change receiving accounts',
+      });
+    }
     const channel = resolveBotChannel(req);
     const existing = await ensureBotConfig(req.tenantId!, companyId, channel);
     let current: any = {};
@@ -586,7 +632,8 @@ router.put('/extended', async (req: Request, res: Response) => {
 // ─── GET /api/bot/extended — ดึง extended config ──────────────────────────────
 router.get('/extended', async (req: Request, res: Response) => {
   try {
-    const companyId = await resolveCompanyId(req);
+    const companyId = await resolveAccessibleCompanyId(req);
+    if (!companyId) return res.status(404).json({ success: false, message: 'Company not found' });
     const bot = await prisma.botConfig.findFirst({ where: { companyId, channel: resolveBotChannel(req) } });
     let extended: any = {};
     if (bot && (bot as any).metadata) {

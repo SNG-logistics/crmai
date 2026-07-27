@@ -8,6 +8,9 @@ Write-Host '=== [1/6] npm install: backend ==='
 Set-Location C:\CRM\backend
 & npm install --no-audit --no-fund
 & npx prisma generate
+# This installation predates Prisma's migration history; db push applies new
+# additive models/columns without requiring an unsafe baseline reset.
+& npx prisma db push
 
 Write-Host '=== [2/6] npm install: frontend ==='
 Set-Location C:\CRM\frontend

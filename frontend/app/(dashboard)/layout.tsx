@@ -30,6 +30,7 @@ const NAV_KEYS = [
   { href: '/settings/channels', icon: '📡', key: 'nav_channels'  },
   { href: '/settings/companies',icon: '🏢', key: 'nav_companies'  },
   { href: '/settings/whatsapp',icon: '💚', key: 'nav_whatsapp'   },
+  { href: '/settings/bank-notifications',icon: '🏦', key: 'nav_bank_notifications' },
   { href: '/settings/backend-api',icon: '🔌', key: 'nav_backend_api' },
   { href: '/settings/users',   icon: '👥', key: 'nav_team'       },
   { href: '/settings/profile',  icon: '👤', key: 'nav_profile'    },
@@ -120,6 +121,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <nav className="sidebar-nav" style={{ maxHeight: 'calc(100vh - 290px)', overflowY: 'auto' }}>
           {NAV_KEYS.filter(({ href }) => {
             if (href === '/settings/audit-logs' && !['admin', 'supervisor', 'superadmin'].includes(user?.role || '')) return false;
+            if (href === '/settings/bank-notifications' && !['admin', 'supervisor', 'superadmin'].includes(user?.role || '')) return false;
             return true;
           }).map(({ href, icon, key }) => {
             const active = isActive(href);

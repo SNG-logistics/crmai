@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '../../../../lib/api';
 import { useSocket } from '../../../../lib/socket';
+import { useAuthStore } from '../../../../store/auth';
 import VisualKnowledgeManager from '../../../../components/VisualKnowledgeManager';
 import KnowledgeFileManager from '../../../../components/KnowledgeFileManager';
 
@@ -59,6 +60,8 @@ function accStatus(a: WaAccount): WaStatus {
 }
 
 export default function WhatsAppSettingsPage() {
+  const { user } = useAuthStore();
+  const canManageReceivingAccounts = ['admin', 'superadmin'].includes(user?.role || '');
   const [tab, setTab] = useState<Tab>('connect');
 
   // ── Companies ──────────────────────────────────────────────────────────────
@@ -292,7 +295,7 @@ export default function WhatsAppSettingsPage() {
         welcomeMessage: ext.welcomeMessage,
         handoffKeywords: ext.handoffKeywords.split(',').map(s => s.trim()).filter(Boolean),
         whatsappLanguage: 'lo',
-        receivingAccounts,
+        ...(canManageReceivingAccounts ? { receivingAccounts } : {}),
       });
       toast.success('✅ บันทึกการตั้งค่า AI แล้ว');
     } catch (e: any) {
@@ -616,16 +619,28 @@ export default function WhatsAppSettingsPage() {
                         <label className="label" style={{ margin: 0 }}>บัญชีรับเงินสำหรับตรวจสลิป</label>
                         <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 3 }}>ระบบจะเทียบธนาคาร ชื่อบัญชี และเลขบัญชีปลายทางในสลิป</div>
                       </div>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => setReceivingAccounts(list => [...list, { bank: '', accountName: '', accountNumber: '' }])}>เพิ่มบัญชี</button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        disabled={!canManageReceivingAccounts}
+                        onClick={() => setReceivingAccounts(list => [...list, { bank: '', accountName: '', accountNumber: '' }])}
+                      >
+                        เพิ่มบัญชี
+                      </button>
                     </div>
+                    {!canManageReceivingAccounts && (
+                      <div style={{ marginBottom: 10, fontSize: '0.72rem', color: 'var(--warning)' }}>
+                        ดูได้อย่างเดียว — เฉพาะผู้ดูแลระบบเท่านั้นที่แก้ไขบัญชีรับเงินได้
+                      </div>
+                    )}
                     {receivingAccounts.length === 0 ? (
                       <div style={{ padding: 12, border: '1px dashed var(--border)', borderRadius: 8, fontSize: '0.75rem', color: 'var(--text-muted)' }}>ยังไม่ได้ตั้งบัญชี ระบบจะไม่ตัดสินว่าบัญชีปลายทางตรงหรือไม่</div>
                     ) : receivingAccounts.map((account, index) => (
                       <div key={index} style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr 1.2fr auto', gap: 7, marginBottom: 8 }}>
-                        <input className="input" value={account.bank} placeholder="ธนาคาร" onChange={e => setReceivingAccounts(list => list.map((item, i) => i === index ? { ...item, bank: e.target.value } : item))} />
-                        <input className="input" value={account.accountName} placeholder="ชื่อบัญชี" onChange={e => setReceivingAccounts(list => list.map((item, i) => i === index ? { ...item, accountName: e.target.value } : item))} />
-                        <input className="input" value={account.accountNumber} placeholder="เลขบัญชี" onChange={e => setReceivingAccounts(list => list.map((item, i) => i === index ? { ...item, accountNumber: e.target.value } : item))} />
-                        <button type="button" className="btn btn-danger btn-sm" onClick={() => setReceivingAccounts(list => list.filter((_, i) => i !== index))}>ลบ</button>
+                        <input className="input" disabled={!canManageReceivingAccounts} value={account.bank} placeholder="ธนาคาร" onChange={e => setReceivingAccounts(list => list.map((item, i) => i === index ? { ...item, bank: e.target.value } : item))} />
+                        <input className="input" disabled={!canManageReceivingAccounts} value={account.accountName} placeholder="ชื่อบัญชี" onChange={e => setReceivingAccounts(list => list.map((item, i) => i === index ? { ...item, accountName: e.target.value } : item))} />
+                        <input className="input" disabled={!canManageReceivingAccounts} value={account.accountNumber} placeholder="เลขบัญชี" onChange={e => setReceivingAccounts(list => list.map((item, i) => i === index ? { ...item, accountNumber: e.target.value } : item))} />
+                        <button type="button" className="btn btn-danger btn-sm" disabled={!canManageReceivingAccounts} onClick={() => setReceivingAccounts(list => list.filter((_, i) => i !== index))}>ลบ</button>
                       </div>
                     ))}
                   </div>

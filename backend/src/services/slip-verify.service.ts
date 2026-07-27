@@ -6,6 +6,12 @@ import FormData from 'form-data';
 import OpenAI from 'openai';
 import prisma from '../lib/prisma';
 import { emitToTenant } from '../lib/socket';
+import {
+  companyRequiresBankNotification,
+  matchSlipWithBankNotification,
+  normalizeBankTransactionRef,
+  normalizeCurrency,
+} from './bank-notification.service';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 const SLIPOK_API_KEY  = process.env.SLIPOK_API_KEY || '';
@@ -79,10 +85,11 @@ export function hashImage(buffer: Buffer): string {
 // ═══════════════════════════════════════════════════════════════════════════════
 export async function checkDuplicate(
   tenantId: string,
-  imageHash: string
+  imageHash: string,
+  companyId?: string | null,
 ): Promise<{ isDuplicate: boolean; original?: any; wasApproved?: boolean }> {
   const matches = await prisma.slipVerification.findMany({
-    where: { tenantId, imageHash },
+    where: { tenantId, imageHash, ...(companyId ? { companyId } : {}) },
     orderBy: { createdAt: 'asc' },
   });
   if (!matches.length) return { isDuplicate: false };
@@ -166,6 +173,7 @@ interface AIVisionResult {
   success: boolean;
   isSlip?: boolean;
   amount?: number;
+  currency?: string;
   bankFrom?: string;
   bankTo?: string;
   transDate?: string;
@@ -186,6 +194,7 @@ const AI_VISION_PROMPT = `วิเคราะห์รูปนี้ ตอ�
 {
   "isSlip": true/false,
   "amount": 0,
+  "currency": "THB/LAK/USD",
   "bankFrom": "ชื่อธนาคารต้นทาง",
   "bankTo": "ชื่อธนาคารปลายทาง",
   "transDate": "DD/MM/YYYY",
@@ -208,6 +217,7 @@ const AI_VISION_PROMPT = `วิเคราะห์รูปนี้ ตอ�
 
 กฎตรวจสอบ:
 - ถ้าไม่ใช่สลิปโอนเงิน isSlip=false
+- อ่านสกุลเงินจริงจากสลิปเท่านั้น (THB/LAK/USD) ถ้าไม่เห็นให้เป็นค่าว่าง
 - อ่านเลขธุรกรรม/เลขอ้างอิง (transRef) ทุกตัวให้ครบ ห้ามเอาเลขบัญชีหรือวันเวลามาใส่แทน
 - แยกเลขบัญชีผู้รับที่มองเห็นเป็นเลขขึ้นต้นและเลขท้าย หากเห็นเฉพาะเลขท้ายให้ receiverAccountPrefix เป็นค่าว่าง
 - ห้ามเดาตัวเลขที่ถูกปิดบังด้วย x, X, *, จุด หรือขีด ให้เก็บเฉพาะตัวเลขที่มองเห็นจริง
@@ -437,7 +447,7 @@ export function checkReceivingAccount(
 }
 
 function normalizeTransactionRef(value?: string): string {
-  return (value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return normalizeBankTransactionRef(value);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -460,6 +470,7 @@ export interface VerifySlipResult {
   status: 'verified' | 'fake' | 'duplicate' | 'not_slip' | 'error' | 'pending';
   verifiedBy: string;
   amount?: number;
+  currency?: string;
   bankFrom?: string;
   bankTo?: string;
   transRef?: string;
@@ -468,6 +479,8 @@ export interface VerifySlipResult {
   receiverAccountPrefix?: string;
   receiverAccountSuffix?: string;
   accountCheck?: AccountCheckStatus;
+  bankNotificationMatched?: boolean;
+  bankMatchReason?: string;
   message: string; // message to send to customer
   record?: any; // saved DB record
   imagePath?: string; // ที่อยู่ไฟล์รูปที่ดาวน์โหลดไว้ (ใช้ต่อกับ AI Vision กรณีไม่ใช่สลิป)
@@ -475,6 +488,21 @@ export interface VerifySlipResult {
 
 export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipResult> {
   const { tenantId, conversationId, contactId, messageId, accessToken, language = 'th' } = opts;
+  let companyId = opts.companyId || null;
+  if (!companyId) {
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: conversationId, tenantId },
+      select: { companyId: true },
+    });
+    companyId = conversation?.companyId || null;
+  }
+  if (!companyId) {
+    companyId = (await prisma.company.findFirst({
+      where: { tenantId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    }))?.id || null;
+  }
 
   console.log(`[SlipVerify] 🔍 Starting verification: tenant=${tenantId} msg=${messageId}`);
 
@@ -503,7 +531,7 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
 
   // ── Step 2: Hash + Duplicate check ──────────────────────────────────────
   const imgHash = hashImage(buffer);
-  const dupCheck = await checkDuplicate(tenantId, imgHash);
+  const dupCheck = await checkDuplicate(tenantId, imgHash, companyId);
 
   if (dupCheck.isDuplicate && dupCheck.original) {
     const original = dupCheck.original;
@@ -511,7 +539,7 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
 
     const record = await prisma.slipVerification.create({
       data: {
-        tenantId, conversationId, contactId, messageId,
+        tenantId, companyId, conversationId, contactId, messageId,
         imageHash: imgHash, imagePath: filePath,
         status: 'duplicate', verifiedBy: 'auto',
         isDuplicate: true, duplicateOfId: original.id,
@@ -545,6 +573,7 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
   let status: 'verified' | 'fake' | 'duplicate' | 'not_slip' | 'error' | 'pending' = 'error';
   let verifiedBy = 'auto';
   let finalAmount = slipok.amount || aiResult.amount;
+  const finalCurrency = slipok.success ? 'THB' : normalizeCurrency(aiResult.currency);
   let finalBankFrom = bankName(slipok.sendingBank) || aiResult.bankFrom || '';
   let finalBankTo = bankName(slipok.receivingBank) || aiResult.bankTo || '';
   let finalTransRef = slipok.transRef || aiResult.transRef || '';
@@ -552,9 +581,9 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
 
   // Account allow-list is configured per company in WhatsApp AI settings.
   let configuredAccounts: ReceivingAccount[] = [];
-  if (opts.companyId) {
+  if (companyId) {
     const config = await prisma.botConfig.findFirst({
-      where: { companyId: opts.companyId, channel: 'whatsapp' },
+      where: { companyId, channel: 'whatsapp' },
       select: { metadata: true },
     });
     try {
@@ -579,17 +608,34 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
   // crops, recompresses, or screenshots the slip so the image hash changes.
   let transactionDuplicate: any = null;
   if (normalizedTransRef.length >= 6) {
-    const recentRefs = await prisma.slipVerification.findMany({
-      where: { tenantId, transRef: { not: null } },
-      orderBy: { createdAt: 'desc' },
-      take: 500,
+    transactionDuplicate = await prisma.slipVerification.findFirst({
+      where: {
+        tenantId,
+        ...(companyId ? { companyId } : {}),
+        normalizedTransRef,
+      },
+      orderBy: { createdAt: 'asc' },
     });
-    transactionDuplicate = recentRefs.find(item =>
-      normalizeTransactionRef(item.transRef || '') === normalizedTransRef
-    ) || null;
+    // Compatibility for records created before normalizedTransRef existed.
+    if (!transactionDuplicate) {
+      const legacyRefs = await prisma.slipVerification.findMany({
+        where: {
+          tenantId,
+          ...(companyId ? { companyId } : {}),
+          normalizedTransRef: null,
+          transRef: { not: null },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      });
+      transactionDuplicate = legacyRefs.find(item =>
+        normalizeTransactionRef(item.transRef || '') === normalizedTransRef
+      ) || null;
+    }
   }
 
   const isSlipEvidence = slipok.success || (aiResult.success && aiResult.isSlip);
+  const requiresBankNotification = await companyRequiresBankNotification(tenantId, companyId);
   const pendingAccountMessage = language === 'lo'
     ? '🧾 ໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ລະບົບຍັງອ່ານບັນຊີຜູ້ຮັບບໍ່ຄົບ ແອດມິນຈະກວດສອບໃຫ້'
     : '🧾 ได้รับสลิปแล้วค่ะ ระบบยังอ่านบัญชีผู้รับได้ไม่ครบ เจ้าหน้าที่จะตรวจสอบให้นะคะ';
@@ -619,6 +665,12 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
       message = language === 'lo'
         ? `🧾 ໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ຕ້ອງໃຫ້ແອດມິນຢືນຢັນເພີ່ມ\n💰 ${finalAmount?.toLocaleString() || '?'}\n🏦 ${finalBankFrom} → ${finalBankTo}`
         : `🧾 ได้รับสลิปแล้วค่ะ ต้องให้เจ้าหน้าที่ยืนยันเพิ่มเติม\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}`;
+    } else if (requiresBankNotification) {
+      status = 'pending';
+      verifiedBy = 'bank_notification_pending';
+      message = language === 'lo'
+        ? `🧾 ກວດສະລິບແລ້ວ ກຳລັງລໍຖ້າຢືນຢັນເງິນເຂົ້າຈາກໂທລະສັບທະນາຄານ\n💰 ${finalAmount?.toLocaleString() || '?'}\n🔖 Ref: ${finalTransRef}`
+        : `🧾 ตรวจข้อมูลสลิปแล้ว กำลังรอยืนยันเงินเข้าจากโทรศัพท์ธนาคาร\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🔖 Ref: ${finalTransRef}`;
     } else {
       status = 'verified';
       verifiedBy = 'slipok';
@@ -665,14 +717,17 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
   }
 
   // ── Step 6: Save to database ────────────────────────────────────────────
-  const record = await prisma.slipVerification.create({
+  let record = await prisma.slipVerification.create({
     data: {
-      tenantId, conversationId, contactId, messageId,
+      tenantId, companyId, conversationId, contactId, messageId,
       imageHash: imgHash, imagePath: filePath,
 
       // SlipOK
       slipokSuccess: slipok.success || null,
-      transRef: finalTransRef || undefined, sendingBank: slipok.sendingBank,
+      transRef: finalTransRef || undefined,
+      normalizedTransRef: normalizedTransRef || undefined,
+      currency: finalCurrency || undefined,
+      sendingBank: slipok.sendingBank,
       receivingBank: slipok.receivingBank, amount: slipok.amount,
       transDate: slipok.transDate, transTime: slipok.transTime,
       senderName: slipok.senderName, receiverName: slipok.receiverName,
@@ -681,6 +736,7 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
       aiSuccess: aiResult.success || null,
       aiAmount: aiResult.amount, aiBankFrom: aiResult.bankFrom,
       aiBankTo: aiResult.bankTo, aiTransDate: aiResult.transDate,
+      aiTransTime: aiResult.transTime,
       aiConfidence: aiResult.confidence,
       aiSuspicious: aiResult.suspicious || false,
       aiReason: aiResult.reason,
@@ -700,18 +756,60 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
     },
   });
 
+  // When a company enrolled a capture phone, the notification becomes the
+  // final corroborating source. Auto-approval requires one unconsumed credit
+  // event with an exact full reference, amount, currency and company match.
+  if (status === 'pending' && companyId && isSlipEvidence && requiresBankNotification) {
+    const bankMatch = await matchSlipWithBankNotification({
+      slipId: record.id,
+      tenantId,
+      companyId,
+      amount: finalAmount,
+      currency: finalCurrency,
+      transRef: finalTransRef,
+      receivingBank: finalBankTo,
+      receiverAccountSuffix: accountCheck.observedSuffix,
+      transDate: slipok.transDate || aiResult.transDate,
+      transTime: slipok.transTime || aiResult.transTime,
+      accountMatched: accountCheck.status === 'match',
+      providerValidated: slipok.success,
+      aiSuspicious: aiResult.suspicious,
+    });
+    if (bankMatch.matched) {
+      status = 'verified';
+      verifiedBy = 'bank_notification';
+      record = (await prisma.slipVerification.findUnique({ where: { id: record.id } })) || record;
+      message = language === 'lo'
+        ? `✅ ກວດພົບເງິນເຂົ້າຈິງແລ້ວເຈົ້າ\n💰 ${finalAmount?.toLocaleString() || '?'}\n🏦 ${finalBankFrom} → ${finalBankTo}\n🔖 Ref: ${finalTransRef}`
+        : `✅ ตรวจพบเงินเข้าจริงและยืนยันสลิปแล้ว\n💰 ${finalAmount?.toLocaleString() || '?'} บาท\n🏦 ${finalBankFrom} → ${finalBankTo}\n🔖 Ref: ${finalTransRef}`;
+    } else if (bankMatch.duplicate) {
+      status = 'duplicate';
+      verifiedBy = 'bank_notification';
+      record = (await prisma.slipVerification.findUnique({ where: { id: record.id } })) || record;
+      message = language === 'lo'
+        ? '⚠️ ເລກທຸລະກຳນີ້ຖືກໃຊ້ຢືນຢັນສະລິບອື່ນແລ້ວ ກະລຸນາຢ່າສົ່ງສະລິບເກົ່າຊ້ຳ'
+        : '⚠️ เลขธุรกรรมนี้ถูกใช้ยืนยันสลิปอื่นแล้ว กรุณาอย่าส่งสลิปเก่าซ้ำ';
+    } else if (bankMatch.conflict) {
+      message = language === 'lo'
+        ? '⚠️ ເລກທຸລະກຳກົງກັນ ແຕ່ຈຳນວນເງິນ ຫຼື ສະກຸນເງິນບໍ່ກົງ ແອດມິນຈະກວດສອບໃຫ້'
+        : '⚠️ เลขธุรกรรมตรงกัน แต่ยอดหรือสกุลเงินไม่ตรง เจ้าหน้าที่จะตรวจสอบให้';
+    }
+  }
+
   console.log(`[SlipVerify] 📝 Saved: id=${record.id} status=${status} by=${verifiedBy}`);
 
   // ── Step 7: Emit socket event ───────────────────────────────────────────
   emitToTenant(tenantId, 'slip_verified', {
     conversationId, messageId, status, verifiedBy,
     amount: finalAmount, bankFrom: finalBankFrom, bankTo: finalBankTo,
+    currency: finalCurrency,
     transRef: finalTransRef, record,
   });
 
   return {
     status, // ⚠️ คงค่า not_slip ไว้ (เดิม map เป็น 'fake' → รูปทั่วไปถูกตอบว่า "สลิปไม่ผ่าน")
     verifiedBy, amount: finalAmount,
+    currency: finalCurrency || undefined,
     bankFrom: finalBankFrom, bankTo: finalBankTo,
     transRef: finalTransRef,
     receiverName,
@@ -719,6 +817,8 @@ export async function verifySlip(opts: VerifySlipOptions): Promise<VerifySlipRes
     receiverAccountPrefix: accountCheck.observedPrefix,
     receiverAccountSuffix: accountCheck.observedSuffix,
     accountCheck: accountCheck.status,
+    bankNotificationMatched: record.bankMatchConfidence === 'high',
+    bankMatchReason: record.bankMatchReason || undefined,
     message, record,
     imagePath: filePath,
   };

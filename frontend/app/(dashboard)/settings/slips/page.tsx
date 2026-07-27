@@ -10,6 +10,7 @@ interface SlipRecord {
   status: string;
   verifiedBy: string;
   amount?: number;
+  currency?: string;
   transRef?: string;
   sendingBank?: string;
   receivingBank?: string;
@@ -25,6 +26,23 @@ interface SlipRecord {
   imageHash: string;
   createdAt: string;
   notes?: string;
+  bankMatchConfidence?: string;
+  bankMatchReason?: string;
+  bankMatchedAt?: string;
+  bankNotification?: {
+    id: string;
+    packageName: string;
+    bankHint?: string | null;
+    amountDisplay?: string | null;
+    amountMinor?: string | null;
+    currency?: string | null;
+    transRef?: string | null;
+    postedAt?: string;
+    receivedAt?: string;
+    parseConfidence?: string;
+    status?: string;
+    matchReason?: string | null;
+  } | null;
 }
 
 interface SlipStats {
@@ -46,8 +64,19 @@ const STATUS_CONFIG: Record<string, { icon: string; label: string; color: string
 };
 
 const VERIFY_MAP: Record<string, string> = {
-  slipok: 'SlipOK QR', ai: 'AI Vision', manual: 'Manual', auto: 'Auto',
+  slipok: 'SlipOK QR',
+  ai: 'AI Vision',
+  manual: 'Manual',
+  auto: 'Auto',
+  bank_notification: 'แจ้งเตือนธนาคาร',
+  bank_notification_pending: 'รอเงินเข้าธนาคาร',
 };
+
+function money(amount?: number, currency = 'THB') {
+  if (amount === undefined || amount === null) return '-';
+  const symbol = currency === 'THB' ? '฿' : currency === 'LAK' ? '₭' : `${currency} `;
+  return `${symbol}${Number(amount).toLocaleString()}`;
+}
 
 export default function SlipHistoryPage() {
   const [slips, setSlips] = useState<SlipRecord[]>([]);
@@ -196,7 +225,7 @@ export default function SlipHistoryPage() {
                     </span>
                   </td>
                   <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    {amt ? `฿${Number(amt).toLocaleString()}` : '-'}
+                    {amt ? money(Number(amt), slip.currency || 'THB') : '-'}
                   </td>
                   <td style={{ padding: '10px 14px', color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
                     {bankFrom || bankTo ? `${bankFrom} → ${bankTo}` : '-'}
@@ -264,7 +293,7 @@ export default function SlipHistoryPage() {
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
               {[
-                { label: 'จำนวนเงิน', value: detail.amount ? `฿${Number(detail.amount).toLocaleString()}` : '-' },
+                { label: 'จำนวนเงิน', value: money(detail.amount || detail.aiAmount, detail.currency || 'THB') },
                 { label: 'Ref', value: detail.transRef || '-' },
                 { label: 'ธนาคารต้นทาง', value: detail.sendingBank || detail.aiBankFrom || '-' },
                 { label: 'ธนาคารปลายทาง', value: detail.receivingBank || detail.aiBankTo || '-' },
@@ -287,6 +316,33 @@ export default function SlipHistoryPage() {
                 fontSize: '0.8rem', color: '#EF4444',
               }}>
                 ⚠️ เหตุผล AI: {detail.aiReason}
+              </div>
+            )}
+
+            {(detail.bankNotification || detail.bankMatchReason) && (
+              <div style={{
+                background: detail.bankNotification ? 'rgba(16,185,129,0.06)' : 'rgba(245,158,11,0.06)',
+                border: `1px solid ${detail.bankNotification ? 'rgba(16,185,129,0.22)' : 'rgba(245,158,11,0.22)'}`,
+                borderRadius: 10,
+                padding: '12px 14px',
+                marginBottom: 16,
+              }}>
+                <div style={{ fontWeight: 700, fontSize: '0.8rem', marginBottom: 7 }}>
+                  🏦 หลักฐานจากโทรศัพท์ธนาคาร
+                </div>
+                {detail.bankNotification ? (
+                  <div style={{ display: 'grid', gap: 4, fontSize: '0.73rem', color: 'var(--text-secondary)' }}>
+                    <div>สถานะ: <strong style={{ color: 'var(--success)' }}>จับคู่แล้ว ({detail.bankMatchConfidence || detail.bankNotification.parseConfidence || '-'})</strong></div>
+                    <div>ยอด: {detail.bankNotification.amountDisplay || detail.bankNotification.amountMinor || '-'} {detail.bankNotification.currency || ''}</div>
+                    <div>Ref: <span style={{ fontFamily: 'monospace' }}>{detail.bankNotification.transRef || '-'}</span></div>
+                    <div>แอป: {detail.bankNotification.bankHint || detail.bankNotification.packageName}</div>
+                    <div>เวลาแจ้งเตือน: {detail.bankNotification.postedAt ? new Date(detail.bankNotification.postedAt).toLocaleString('th-TH') : '-'}</div>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '0.73rem', color: 'var(--warning)' }}>
+                    ยังไม่ยืนยันอัตโนมัติ: {detail.bankMatchReason}
+                  </div>
+                )}
               </div>
             )}
 

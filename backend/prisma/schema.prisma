@@ -26,31 +26,34 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users             User[]
-  contacts          Contact[]
-  conversations     Conversation[]
-  tickets           Ticket[]
-  tags              Tag[]
-  bots              BotConfig[]
-  broadcasts        Broadcast[]
-  automations       AutomationRule[]
-  channels          ChannelConfig[]
-  callLogs          CallLog[]
-  tsTargets         TelesalesTarget[]
-  financials        FinancialRecord[]
-  partners          Partner[]
-  smsLogs           SmsLog[]
-  flexTemplates     FlexTemplate[]
-  auditLogs         AuditLog[]
-  slipVerifications SlipVerification[]
-  companies         Company[]
-  whatsappAccounts  WhatsAppAccount[]
-  bonusTimeConfigs  BonusTimeConfig[]
-  bonusTimeCamps    BonusTimeCamp[]
-  bonusTimeGames    BonusTimeGame[]
-  quickReplies      QuickReply[]
-  slotProviders     SlotProvider[]
-  slotLeads         SlotLead[]
+  users              User[]
+  contacts           Contact[]
+  conversations      Conversation[]
+  tickets            Ticket[]
+  tags               Tag[]
+  bots               BotConfig[]
+  broadcasts         Broadcast[]
+  automations        AutomationRule[]
+  channels           ChannelConfig[]
+  callLogs           CallLog[]
+  tsTargets          TelesalesTarget[]
+  financials         FinancialRecord[]
+  partners           Partner[]
+  smsLogs            SmsLog[]
+  flexTemplates      FlexTemplate[]
+  auditLogs          AuditLog[]
+  slipVerifications  SlipVerification[]
+  bankCaptureDevices BankCaptureDevice[]
+  bankNotifications  BankNotification[]
+  bankRequestNonces  BankRequestNonce[]
+  companies          Company[]
+  whatsappAccounts   WhatsAppAccount[]
+  bonusTimeConfigs   BonusTimeConfig[]
+  bonusTimeCamps     BonusTimeCamp[]
+  bonusTimeGames     BonusTimeGame[]
+  quickReplies       QuickReply[]
+  slotProviders      SlotProvider[]
+  slotLeads          SlotLead[]
 }
 
 // =============================================
@@ -103,11 +106,13 @@ model Company {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  whatsappAccounts WhatsAppAccount[]
-  conversations    Conversation[]
-  botConfigs       BotConfig[]
-  members          UserCompany[]
-  channelConfigs   ChannelConfig[]
+  whatsappAccounts   WhatsAppAccount[]
+  conversations      Conversation[]
+  botConfigs         BotConfig[]
+  members            UserCompany[]
+  channelConfigs     ChannelConfig[]
+  bankCaptureDevices BankCaptureDevice[]
+  bankNotifications  BankNotification[]
 
   @@unique([tenantId, name])
 }
@@ -351,21 +356,21 @@ model BotConfig {
 // =============================================
 
 model KnowledgeBase {
-  id            String    @id @default(cuid())
-  botConfigId   String
-  botConfig     BotConfig @relation(fields: [botConfigId], references: [id], onDelete: Cascade)
-  question      String
-  answer        String
-  category      String    @default("general")
-  sourceType    String    @default("qa") // qa | visual
-  sourceText    String? // ข้อความที่ผู้ดูแลกำกับรูป
-  imageUrl      String? // รูปต้นฉบับใน /uploads/knowledge
+  id              String    @id @default(cuid())
+  botConfigId     String
+  botConfig       BotConfig @relation(fields: [botConfigId], references: [id], onDelete: Cascade)
+  question        String
+  answer          String
+  category        String    @default("general")
+  sourceType      String    @default("qa") // qa | visual
+  sourceText      String? // ข้อความที่ผู้ดูแลกำกับรูป
+  imageUrl        String? // รูปต้นฉบับใน /uploads/knowledge
   imagePreviewUrl String? // รูป preview สำหรับ LINE (JPEG ไม่เกินข้อกำหนด)
-  imageAnalysis String? // OCR/ข้อเท็จจริง/คำค้นที่ AI อ่านจากรูป
-  sendImage     Boolean   @default(true) // ส่งรูปต้นฉบับพร้อมคำตอบเมื่อรายการนี้ตรงคำถาม
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  imageAnalysis   String? // OCR/ข้อเท็จจริง/คำค้นที่ AI อ่านจากรูป
+  sendImage       Boolean   @default(true) // ส่งรูปต้นฉบับพร้อมคำตอบเมื่อรายการนี้ตรงคำถาม
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   @@index([botConfigId])
 }
@@ -596,9 +601,10 @@ model AuditLog {
 // =============================================
 
 model SlipVerification {
-  id             String @id @default(cuid())
+  id             String  @id @default(cuid())
   tenantId       String
-  tenant         Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant         Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId      String?
   conversationId String
   contactId      String
   messageId      String // message ที่ส่งรูปมา
@@ -608,15 +614,17 @@ model SlipVerification {
   imagePath String // path ที่เก็บรูป
 
   // ─── SlipOK Result ───
-  slipokSuccess Boolean?
-  transRef      String? // transaction reference
-  sendingBank   String?
-  receivingBank String?
-  amount        Float?
-  transDate     String?
-  transTime     String?
-  senderName    String?
-  receiverName  String?
+  slipokSuccess      Boolean?
+  transRef           String? // transaction reference
+  normalizedTransRef String?
+  currency           String?
+  sendingBank        String?
+  receivingBank      String?
+  amount             Float?
+  transDate          String?
+  transTime          String?
+  senderName         String?
+  receiverName       String?
 
   // ─── AI Vision Result ───
   aiSuccess    Boolean?
@@ -624,6 +632,7 @@ model SlipVerification {
   aiBankFrom   String?
   aiBankTo     String?
   aiTransDate  String?
+  aiTransTime  String?
   aiConfidence String? // high, medium, low
   aiSuspicious Boolean  @default(false)
   aiReason     String?
@@ -634,12 +643,101 @@ model SlipVerification {
   isDuplicate   Boolean @default(false)
   duplicateOfId String?
 
+  // ─── Trusted mobile bank-notification corroboration ───
+  bankNotification    BankNotification?
+  bankMatchConfidence String?
+  bankMatchReason     String?
+  bankMatchedAt       DateTime?
+
   notes     String?
   createdAt DateTime @default(now())
 
   @@index([tenantId])
+  @@index([tenantId, companyId])
   @@index([imageHash])
   @@index([transRef])
+  @@index([tenantId, companyId, normalizedTransRef])
+}
+
+// Android devices enrolled by an administrator. The public id is sent by the
+// app; the per-device HMAC secret is encrypted at rest and is only shown once.
+model BankCaptureDevice {
+  id                String    @id @default(cuid())
+  tenantId          String
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId         String
+  company           Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  publicId          String    @unique
+  name              String
+  secretEncrypted   String
+  credentialVersion Int       @default(1)
+  allowedPackages   String    @default("[]")
+  signerPins        String    @default("{}")
+  isActive          Boolean   @default(true)
+  lastSeenAt        DateTime?
+  lastError         String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  notifications BankNotification[]
+  requestNonces BankRequestNonce[]
+
+  @@index([tenantId, companyId])
+}
+
+// A sanitized and authenticated notification captured by an enrolled Android
+// device. Raw notification fields are encrypted and never returned by the API.
+model BankNotification {
+  id                  String            @id @default(cuid())
+  tenantId            String
+  tenant              Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId           String
+  company             Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deviceId            String
+  device              BankCaptureDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  credentialVersion   Int               @default(1)
+  eventId             String
+  notificationKeyHash String
+  packageName         String
+  signerSha256        String?
+  appVersion          String?
+  bankHint            String?
+  direction           String
+  amountMinor         String?
+  amountDisplay       String?
+  currency            String?
+  transRef            String?
+  accountSuffix       String?
+  senderName          String?
+  postedAt            DateTime
+  capturedAt          DateTime
+  receivedAt          DateTime          @default(now())
+  contentHash         String
+  rawPayloadEncrypted String?
+  parseConfidence     String            @default("low")
+  status              String            @default("received")
+  matchReason         String?
+  matchedSlipId       String?           @unique
+  matchedSlip         SlipVerification? @relation(fields: [matchedSlipId], references: [id], onDelete: SetNull)
+
+  @@unique([deviceId, eventId])
+  @@index([tenantId, companyId, receivedAt])
+  @@index([tenantId, companyId, transRef])
+  @@index([tenantId, companyId, amountMinor, currency])
+}
+
+// Short-lived replay guard for signed device requests.
+model BankRequestNonce {
+  id        String            @id @default(cuid())
+  tenantId  String
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deviceId  String
+  device    BankCaptureDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  nonce     String
+  createdAt DateTime          @default(now())
+
+  @@unique([deviceId, nonce])
+  @@index([createdAt])
 }
 
 // =============================================

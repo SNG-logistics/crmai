@@ -61,5 +61,8 @@ backend/uploads/*
 coverage/
 .nyc_output/
 
+# Repo-local Android toolchain cache (generated; never commit)
+.android-build-tools/
+
 # Claude session
 .claude/

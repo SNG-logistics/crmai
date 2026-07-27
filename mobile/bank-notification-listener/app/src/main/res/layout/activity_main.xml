@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingLeft="20dp"
+        android:paddingTop="32dp"
+        android:paddingRight="20dp"
+        android:paddingBottom="40dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/screen_title"
+            android:textColor="@color/text_primary"
+            android:textSize="26sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="24dp"
+            android:text="@string/screen_subtitle"
+            android:textColor="@color/text_secondary"
+            android:textSize="15sp" />
+
+        <TextView
+            style="@style/FieldLabel"
+            android:text="@string/server_url_label" />
+
+        <EditText
+            android:id="@+id/serverUrlInput"
+            style="@style/FieldInput"
+            android:hint="@string/server_url_hint"
+            android:importantForAutofill="no"
+            android:inputType="textUri"
+            android:maxLines="1" />
+
+        <TextView
+            style="@style/FieldLabel"
+            android:text="@string/device_id_label" />
+
+        <EditText
+            android:id="@+id/deviceIdInput"
+            style="@style/FieldInput"
+            android:hint="@string/device_id_hint"
+            android:importantForAutofill="no"
+            android:inputType="textNoSuggestions"
+            android:maxLines="1" />
+
+        <TextView
+            style="@style/FieldLabel"
+            android:text="@string/device_secret_label" />
+
+        <EditText
+            android:id="@+id/deviceSecretInput"
+            style="@style/FieldInput"
+            android:hint="@string/device_secret_hint_new"
+            android:importantForAutofill="no"
+            android:inputType="textPassword"
+            android:maxLines="1" />
+
+        <TextView
+            style="@style/FieldLabel"
+            android:text="@string/allowlist_label" />
+
+        <EditText
+            android:id="@+id/allowlistInput"
+            style="@style/FieldInput"
+            android:hint="@string/allowlist_hint"
+            android:importantForAutofill="no"
+            android:inputType="textNoSuggestions|textMultiLine"
+            android:minLines="3"
+            android:gravity="top|start" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="@string/allowlist_help"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/saveButton"
+            style="@style/PrimaryButton"
+            android:layout_marginTop="22dp"
+            android:text="@string/save_button" />
+
+        <Button
+            android:id="@+id/testButton"
+            style="@style/SecondaryButton"
+            android:text="@string/test_button" />
+
+        <Button
+            android:id="@+id/openAccessButton"
+            style="@style/SecondaryButton"
+            android:text="@string/open_access_button" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="@string/status_title"
+            android:textColor="@color/text_primary"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/edit_text_background"
+            android:padding="14dp"
+            android:text="@string/status_never"
+            android:textColor="@color/text_primary"
+            android:textIsSelectable="true"
+            android:textSize="14sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="@string/security_note"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+</ScrollView>

@@ -990,6 +990,7 @@ async function processWhatsAppImage(
       status: slip.status,
       verifiedBy: slip.verifiedBy,
       amount: slip.amount,
+      currency: slip.currency,
       bankFrom: slip.bankFrom,
       bankTo: slip.bankTo,
       transRef: slip.transRef,
@@ -998,6 +999,8 @@ async function processWhatsAppImage(
       receiverAccountPrefix: slip.receiverAccountPrefix,
       receiverAccountSuffix: slip.receiverAccountSuffix,
       accountCheck: slip.accountCheck,
+      bankNotificationMatched: slip.bankNotificationMatched,
+      bankMatchReason: slip.bankMatchReason,
       recordId: slip.record?.id,
     };
     await prisma.message.update({ where: { id: dbMessageId }, data: { metadata: JSON.stringify(metadata) } });
@@ -1044,6 +1047,38 @@ async function trySend(accountId: string, jid: string, text: string, imageUrl?: 
     else await sock.sendMessage(jid, { text });
     return true;
   } catch { return false; }
+}
+
+// Used when a bank notification arrives after the customer's slip. The
+// verification service calls this lazily to avoid a module-initialization cycle.
+export async function sendBankVerificationFollowUp(
+  conversationId: string,
+  text: string,
+  slipId: string,
+): Promise<void> {
+  const conversation = await prisma.conversation.findUnique({
+    where: { id: conversationId },
+    select: {
+      tenantId: true,
+      whatsAppAccountId: true,
+      channelId: true,
+      contact: { select: { whatsappId: true } },
+    },
+  });
+  if (!conversation?.whatsAppAccountId) return;
+  const ctx = ctxMap.get(conversation.whatsAppAccountId)
+    || await loadAccountCtx(conversation.whatsAppAccountId);
+  if (!ctx) return;
+  const channelJid = conversation.channelId.includes(':')
+    ? conversation.channelId.slice(conversation.channelId.indexOf(':') + 1)
+    : conversation.channelId;
+  const jid = conversation.contact.whatsappId || channelJid;
+  if (!jid) return;
+  await sendStoredBotText(ctx, conversationId, jid, text, {
+    flow: 'bank_notification_slip_verified',
+    slipId,
+  });
+  emitToTenant(conversation.tenantId, 'conversation_updated', { id: conversationId });
 }
 
 // ─── Send message (agent reply) — โยน error ถ้าเบอร์นั้นไม่ได้ต่อ ───────────────

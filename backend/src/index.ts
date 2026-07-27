@@ -35,6 +35,9 @@ import lineContentRoutes from './routes/line-content';
 import bonusTimeRoutes from './routes/bonustime';
 import quickReplyRoutes from './routes/quick-replies';
 import backendApiRoutes from './routes/backend-api';
+import bankNotificationIngestRoutes from './routes/bank-notification-ingest';
+import bankNotificationRoutes from './routes/bank-notifications';
+import { startBankNotificationMaintenance } from './services/bank-notification.service';
 import { initWhatsAppSessions } from './services/whatsapp.service';
 import { startPkmListener } from './services/pkm-listener.service';
 import { isFirebaseEnabled, firebaseInitError } from './lib/firebase-admin';
@@ -80,6 +83,11 @@ app.use('/api/', limiter);
 // Parsing
 app.use(morgan('dev'));
 app.use('/api/webhooks', express.raw({ type: 'application/json' })); // raw for webhook signature verification
+app.use(
+  '/api/bank-notifications/ingest',
+  express.raw({ type: 'application/json', limit: '64kb' }),
+  bankNotificationIngestRoutes,
+);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -153,6 +161,7 @@ app.use('/api/line',       lineContentRoutes);
 app.use('/api/bonustime',  bonusTimeRoutes);
 app.use('/api/quick-replies', quickReplyRoutes);
 app.use('/api/backend-api', backendApiRoutes);
+app.use('/api/bank-notifications', bankNotificationRoutes);
 
 
 
@@ -189,6 +198,7 @@ async function main() {
     // Redis is optional — don't await, just try
     connectRedis().catch(() => {});
     initSocket(httpServer);
+    startBankNotificationMaintenance();
     httpServer.listen(PORT, () => {
       console.log(`🚀 CRM Backend running on http://localhost:${PORT}`);
       console.log(`📡 Socket.io ready`);

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CRM Bank Watch</string>
+    <string name="listener_service_name">Bank notification listener</string>
+    <string name="screen_title">ตัวรับแจ้งเตือนเงินเข้า</string>
+    <string name="screen_subtitle">ส่งเฉพาะการแจ้งเตือนจากแอปธนาคารที่กำหนดไปยัง CRM</string>
+    <string name="server_url_label">Server URL (HTTPS)</string>
+    <string name="server_url_hint">https://crm.example.com</string>
+    <string name="device_id_label">Device public ID</string>
+    <string name="device_id_hint">คัดลอกจากหน้า CRM</string>
+    <string name="device_secret_label">Device secret</string>
+    <string name="device_secret_hint_new">กรอก secret ที่แสดงครั้งเดียว</string>
+    <string name="device_secret_hint_saved">บันทึกไว้แล้ว — เว้นว่างเพื่อใช้ค่าเดิม</string>
+    <string name="allowlist_label">แพ็กเกจแอปธนาคารที่อนุญาต (คั่นด้วย comma หรือขึ้นบรรทัดใหม่)</string>
+    <string name="allowlist_hint">com.bank.one, com.bank.two</string>
+    <string name="allowlist_help">ระบบจับคู่ชื่อแพ็กเกจแบบตรงตัวเท่านั้น หากช่องนี้ว่างจะไม่ส่งการแจ้งเตือนใด</string>
+    <string name="save_button">บันทึกการตั้งค่า</string>
+    <string name="test_button">ทดสอบการเชื่อมต่อ</string>
+    <string name="open_access_button">เปิดสิทธิ์เข้าถึงการแจ้งเตือน</string>
+    <string name="status_title">สถานะล่าสุด</string>
+    <string name="status_never">ยังไม่เคยส่งข้อมูล</string>
+    <string name="status_access_enabled">สิทธิ์แจ้งเตือน: เปิดแล้ว</string>
+    <string name="status_access_disabled">สิทธิ์แจ้งเตือน: ยังไม่เปิด</string>
+    <string name="status_format">%1$s\n%2$s</string>
+    <string name="security_note">แอปไม่อ่าน SMS ไม่จับภาพหน้าจอ และไม่พิมพ์ข้อมูลแจ้งเตือนลง log ข้อมูลคิวถูกเข้ารหัสบนเครื่อง</string>
+</resources>
