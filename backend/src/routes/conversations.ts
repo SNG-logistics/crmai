@@ -7,6 +7,7 @@ import { generateReplySuggestion, generateContextualReply, summarizeConversation
 import { sendLineReply, sendLinePush, lineTextMessage } from '../services/line.service';
 import { sendTelegramMessage } from '../services/telegram.service';
 import { sendWhatsAppMessage } from '../services/whatsapp.service';
+import { captureCredentialsFromWhatsAppAgentMessage } from '../services/customer-credentials.service';
 import { getUserCompanyIds, canAccessCompany } from '../lib/company-scope';
 
 const router = Router();
@@ -437,6 +438,16 @@ router.post('/:id/messages', async (req: Request, res: Response) => {
     const message = await prisma.message.create({
       data: { conversationId: conversation.id, tenantId: req.tenantId!, senderId: req.user!.id, senderType: 'agent', type, content },
     });
+
+    if (conversation.channel === 'whatsapp') {
+      await captureCredentialsFromWhatsAppAgentMessage({
+        tenantId: req.tenantId!,
+        conversationId: conversation.id,
+        text: content,
+      }).catch((error: any) => {
+        console.error('[CustomerCredentials] agent message capture failed:', error?.message || error);
+      });
+    }
 
     await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
 

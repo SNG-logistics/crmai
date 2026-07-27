@@ -19,8 +19,8 @@ import fs from 'fs';
 import qrcode from 'qrcode';
 import prisma from '../lib/prisma';
 import { emitToTenant } from '../lib/socket';
-import { checkRepeatAbuse, REPEAT_HANDOFF_REPLY } from './bot-guard';
-import { parseBotSettings, processBotMessage, visionAssistReply } from './ai.service';
+import { checkRepeatAbuse } from './bot-guard';
+import { processBotMessage, visionAssistReply } from './ai.service';
 import {
   buildProfileContext,
   buildRegisterReply,
@@ -31,6 +31,15 @@ import {
   normalizeCustomerPhone,
   readProfile,
 } from './contact-memory.service';
+import {
+  backfillCredentialsFromWhatsAppHistory,
+  buildCredentialReply,
+  buildUnregisteredCredentialReply,
+  captureCredentialsFromWhatsAppAgentMessage,
+  extractGameCredentials,
+  isCredentialRecoveryIntent,
+  readCustomerGameCredentials,
+} from './customer-credentials.service';
 import {
   BonusTimeWhatsAppResult,
   buildBonusTimeWhatsAppResult,
@@ -63,6 +72,17 @@ const ctxMap    = new Map<string, AccountCtx>();// accountId → ctx (tenant/com
 const registrationReplyTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const incomingMessageInFlight = new Set<string>();
 const REGISTRATION_IDLE_MS = 12_000;
+const WHATSAPP_CUSTOMER_LANGUAGE = 'lo' as const;
+const WHATSAPP_REPEAT_REPLY = 'ໄດ້ຮັບຂໍ້ຄວາມແລ້ວເຈົ້າ ລໍຖ້າຈັກຄູ່ເຈົ້າ 🙏😊';
+const WHATSAPP_LAO_FALLBACK =
+  'ຂໍອະໄພເຈົ້າ ຂໍ້ຄວາມອັດຕະໂນມັດຂັດຂ້ອງຊົ່ວຄາວ ລໍຖ້າແອດມິນກວດສອບຈັກຄູ່ເຈົ້າ 🙏';
+
+function ensureLaoWhatsAppReply(text: string): string {
+  const reply = (text || '').trim();
+  const hasThai = /[\u0E00-\u0E7F]/u.test(reply);
+  const hasLao = /[\u0E80-\u0EFF]/u.test(reply);
+  return reply && hasLao && !hasThai ? reply : WHATSAPP_LAO_FALLBACK;
+}
 
 // conversation.channelId ของ whatsapp = "<accountId>:<jid>" เพื่อแยกเบอร์
 // (ลูกค้าคนเดียวทักหลายเบอร์ = คนละบทสนทนา ไม่ชน @@unique([tenantId,channel,channelId]))
@@ -297,12 +317,48 @@ export async function connectWhatsAppAccount(accountId: string): Promise<void> {
     if (type !== 'notify') return;
     for (const msg of messages) {
       if (!msg.message) continue;
-      if (msg.key.fromMe) continue;
+      if (msg.key.fromMe) {
+        await captureCredentialsFromLinkedWhatsApp(ctx, msg);
+        continue;
+      }
       if (isJidBroadcast(msg.key.remoteJid || '')) continue;
       if (isJidGroup(msg.key.remoteJid || '')) continue; // ข้าม group chat
       await handleIncomingMessage(ctx, msg, sock);
     }
   });
+}
+
+async function captureCredentialsFromLinkedWhatsApp(ctx: AccountCtx, msg: any) {
+  try {
+    const normalizedContent = normalizeMessageContent(msg.message);
+    const content = normalizedContent ? extractMessageText(normalizedContent) : '';
+    if (!extractGameCredentials(content)) return;
+    const jid = msg.key?.remoteJid as string | undefined;
+    if (!jid) return;
+    const conversation = await prisma.conversation.findFirst({
+      where: {
+        tenantId: ctx.tenantId,
+        companyId: ctx.companyId,
+        channel: 'whatsapp',
+        whatsAppAccountId: ctx.accountId,
+        OR: [
+          { channelId: waChannelId(ctx.accountId, jid) },
+          { contact: { whatsappId: jid } },
+        ],
+      },
+      orderBy: { lastMessageAt: 'desc' },
+      select: { id: true },
+    });
+    if (!conversation) return;
+    const captured = await captureCredentialsFromWhatsAppAgentMessage({
+      tenantId: ctx.tenantId,
+      conversationId: conversation.id,
+      text: content,
+    });
+    if (captured) emitToTenant(ctx.tenantId, 'conversation_updated', { id: conversation.id });
+  } catch (error: any) {
+    console.error('[CustomerCredentials] linked WhatsApp capture failed:', error?.message || error);
+  }
 }
 
 // ─── Handle incoming message pipeline ────────────────────────────────────────
@@ -433,10 +489,17 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
         if (msgType === 'text') {
           await processBotReply(ctx, conversation.id, contact.id, content, jid);
         } else if (mediaMeta.imageUrl) {
-          const language = parseBotSettings(bot?.metadata).whatsappLanguage || 'th';
-          await processWhatsAppImage(ctx, conversation.id, contact.id, message.id, platformMsgId || message.id, mediaMeta.imageUrl, jid, language);
+          await processWhatsAppImage(
+            ctx,
+            conversation.id,
+            contact.id,
+            message.id,
+            platformMsgId || message.id,
+            mediaMeta.imageUrl,
+            jid,
+            WHATSAPP_CUSTOMER_LANGUAGE,
+          );
         } else if (msgType === 'audio') {
-          const language = parseBotSettings(bot?.metadata).whatsappLanguage || 'th';
           await processWhatsAppAudio(
             ctx,
             conversation.id,
@@ -445,7 +508,7 @@ async function handleIncomingMessage(ctx: AccountCtx, msg: any, sock: WASocket) 
             mediaMeta,
             incomingMetadata,
             jid,
-            language,
+            WHATSAPP_CUSTOMER_LANGUAGE,
           );
         }
       }
@@ -474,14 +537,15 @@ async function sendStoredBotText(
   reply: string,
   metadata?: Record<string, unknown>,
 ) {
-  await trySend(ctx.accountId, jid, reply);
+  const laoReply = ensureLaoWhatsAppReply(reply);
+  await trySend(ctx.accountId, jid, laoReply);
   const botMsg = await prisma.message.create({
     data: {
       conversationId,
       tenantId: ctx.tenantId,
       senderType: 'bot',
       type: 'text',
-      content: reply,
+      content: laoReply,
       metadata: metadata && Object.keys(metadata).length ? JSON.stringify(metadata) : undefined,
     },
   });
@@ -535,9 +599,9 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
     // 🛡️ กันสแปมถามซ้ำเผา token → ตอบ auto ครั้งเดียว + สลับเป็น human (ไม่เรียก AI)
     const abuse = await checkRepeatAbuse(conversationId, userMessage);
     if (abuse.repeat) {
-      await trySend(accountId, jid, REPEAT_HANDOFF_REPLY);
+      await trySend(accountId, jid, WHATSAPP_REPEAT_REPLY);
       const botMsg = await prisma.message.create({
-        data: { conversationId, tenantId, senderType: 'bot', type: 'text', content: REPEAT_HANDOFF_REPLY },
+        data: { conversationId, tenantId, senderType: 'bot', type: 'text', content: WHATSAPP_REPEAT_REPLY },
       });
       emitToTenant(tenantId, 'new_message', { conversationId, companyId, channel: 'whatsapp', message: { ...botMsg, senderType: 'bot' } });
       console.log(`[WA] 🛡️ Repeat abuse → bot remains active conversation=${conversationId} count=${abuse.count}`);
@@ -560,17 +624,29 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
 
     const contact = await prisma.contact.findFirst({ where: { id: contactId, tenantId } });
     if (!contact) return;
-    const botConfig = await prisma.botConfig.findFirst({ where: { companyId, channel: 'whatsapp' }, select: { metadata: true } });
-    const language = parseBotSettings(botConfig?.metadata).whatsappLanguage || 'th';
+    const language = WHATSAPP_CUSTOMER_LANGUAGE;
     const lastBot = [...history].reverse().find((m: any) => m.senderType === 'bot');
     let lastBotMeta: any = {};
     try { lastBotMeta = JSON.parse((lastBot as any)?.metadata || '{}'); } catch { lastBotMeta = {}; }
     const registerIntent = isRegisterIntent(userMessage);
+    const credentialRecoveryIntent = isCredentialRecoveryIntent(userMessage);
     const hasCustomerInfo = mightContainCustomerInfo(userMessage);
     const registrationDone = isRegistrationDoneSignal(userMessage);
     const registrationFlow = registerIntent || lastBotMeta.flow === 'registration';
 
     let profile = readProfile(contact as any);
+    let storedCredentials = credentialRecoveryIntent
+      ? readCustomerGameCredentials(contact as any, companyId)
+      : null;
+    if (credentialRecoveryIntent && !storedCredentials) {
+      storedCredentials = await backfillCredentialsFromWhatsAppHistory({
+        tenantId,
+        conversationId,
+      }).catch((error: any) => {
+        console.error('[CustomerCredentials] history backfill failed:', error?.message || error);
+        return null;
+      });
+    }
     let capturedCustomerInfo = false;
     if (hasCustomerInfo || (lastBotMeta.flow === 'registration' && !registrationDone)) {
       const captured = await captureCustomerInfo({
@@ -613,7 +689,12 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
         wildRate: lastBotMeta.wildRate,
       } : undefined,
     });
-    if (hasEarlierSlip) {
+    if (credentialRecoveryIntent) {
+      reply = storedCredentials
+        ? buildCredentialReply(storedCredentials)
+        : buildUnregisteredCredentialReply(profile);
+      responseFlow = storedCredentials ? 'credential_recovery' : 'registration';
+    } else if (hasEarlierSlip) {
       reply = language === 'lo'
         ? 'ແອດມິນໄດ້ຮັບສະລິບແລ້ວເຈົ້າ ກຳລັງດຳເນີນການກວດສອບໃຫ້ ລໍຖ້າຈັກຄູ່ເຈົ້າ'
         : 'แอดมินได้รับสลิปแล้วค่ะ กำลังดำเนินการตรวจสอบให้ รอสักครู่นะคะ';
@@ -646,7 +727,11 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
         userMessage,
         { displayName: contact.displayName },
         companyId,
-        { profileContext: buildProfileContext(profile), channel: 'whatsapp' },
+        {
+          profileContext: buildProfileContext(profile),
+          channel: 'whatsapp',
+          language: WHATSAPP_CUSTOMER_LANGUAGE,
+        },
       );
       reply = result.reply;
       const imageWasSentRecently = result.knowledgeId && history.some((message: any) => {
@@ -663,6 +748,7 @@ async function processBotReply(ctx: AccountCtx, conversationId: string, contactI
       }
     }
 
+    reply = ensureLaoWhatsAppReply(reply);
     const imageSource = resolveOutgoingImageSource(responseImage?.imageUrl);
     const sentWithImage = imageSource ? await trySend(accountId, jid, reply, imageSource) : false;
     const sentAsText = sentWithImage ? false : await trySend(accountId, jid, reply);
@@ -885,6 +971,7 @@ async function processWhatsAppImage(
         })),
         lastCustomerText: [...history].reverse().find((m: any) => m.senderType === 'customer')?.content,
         channel: 'whatsapp',
+        language: WHATSAPP_CUSTOMER_LANGUAGE,
       });
       imageAnalysis = {
         kind: assist.kind,
@@ -920,6 +1007,7 @@ async function processWhatsAppImage(
         ? 'ແອດມິນໄດ້ຮັບຮູບແລ້ວເຈົ້າ ກຳລັງກວດສອບໃຫ້'
         : 'แอดมินได้รับรูปแล้วค่ะ กำลังตรวจสอบให้';
     }
+    reply = ensureLaoWhatsAppReply(reply);
     await trySend(accountId, jid, reply);
     const botMsg = await prisma.message.create({
       data: {

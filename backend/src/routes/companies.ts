@@ -56,7 +56,7 @@ router.post('/', requireRole('admin', 'superadmin'), async (req: Request, res: R
         model: 'gemini-3.6-flash',
         temperature: 0.7,
         isActive: true,
-        metadata: channel === 'whatsapp' ? JSON.stringify({ whatsappLanguage: 'th' }) : '{}',
+        metadata: channel === 'whatsapp' ? JSON.stringify({ whatsappLanguage: 'lo' }) : '{}',
       })),
     }).catch(() => {});
 

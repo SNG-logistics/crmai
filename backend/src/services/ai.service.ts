@@ -305,6 +305,7 @@ export async function processBotMessage(
     bonusTimeActive?: boolean;
     profileContext?: string;
     channel?: 'line' | 'whatsapp' | 'telegram';
+    language?: 'th' | 'lo';
   }
 ): Promise<BotMessageResult> {
 
@@ -369,7 +370,9 @@ export async function processBotMessage(
 
   // ─ การตั้งค่าละเอียดของบอท (จากหน้า AI Bot) ─
   const settings = parseBotSettings(botConfig?.metadata);
-  const forcedLanguage = opts?.channel === 'whatsapp' ? settings.whatsappLanguage : undefined;
+  const forcedLanguage = opts?.channel === 'whatsapp'
+    ? (opts.language || settings.whatsappLanguage)
+    : undefined;
   const rules = buildSystemRules(settings, forcedLanguage);
 
   // ─ ข้อมูลธุรกิจ/โปรโมชั่น: ใช้เฉพาะสิ่งที่ผู้ดูแลตั้งค่าเอง ─
@@ -676,6 +679,7 @@ export async function visionAssistReply(opts: {
   conversationHistory?: { role: 'user' | 'assistant'; content: string }[];
   lastCustomerText?: string;
   channel?: 'line' | 'whatsapp' | 'telegram';
+  language?: 'th' | 'lo';
 }): Promise<{
   kind: 'slip' | 'problem' | 'other';
   isSlip: boolean;
@@ -693,7 +697,9 @@ export async function visionAssistReply(opts: {
 
   const basePrompt = (botConfig?.systemPrompt || '').trim();
   const settings = parseBotSettings(botConfig?.metadata);
-  const forcedLanguage = opts.channel === 'whatsapp' ? settings.whatsappLanguage : undefined;
+  const forcedLanguage = opts.channel === 'whatsapp'
+    ? (opts.language || settings.whatsappLanguage)
+    : undefined;
   const rules = buildSystemRules(settings, forcedLanguage);
   const businessContext = settings.businessInfo
     ? `\n\n—— ข้อมูลธุรกิจที่ผู้ดูแลอนุญาตให้ AI เรียนรู้ ——\n${settings.businessInfo}`

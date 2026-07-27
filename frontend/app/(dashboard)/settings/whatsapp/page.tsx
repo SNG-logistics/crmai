@@ -83,7 +83,7 @@ export default function WhatsAppSettingsPage() {
 
   // ── AI settings state (per company) ──────────────────────────────────────────
   const [ai, setAi] = useState({ isActive: true, model: 'gemini-3.6-flash', temperature: 0.7, systemPrompt: '' });
-  const [ext, setExt] = useState({ welcomeMessage: '', handoffKeywords: '', whatsappLanguage: 'th' as 'th' | 'lo' });
+  const [ext, setExt] = useState({ welcomeMessage: '', handoffKeywords: '', whatsappLanguage: 'lo' as 'th' | 'lo' });
   const [receivingAccounts, setReceivingAccounts] = useState<ReceivingAccount[]>([]);
   const [aiLoading, setAiLoading] = useState(true);
   const [aiSaving, setAiSaving] = useState(false);
@@ -157,12 +157,12 @@ export default function WhatsAppSettingsPage() {
       setExt({
         welcomeMessage: ex.welcomeMessage || '',
         handoffKeywords: Array.isArray(ex.handoffKeywords) ? ex.handoffKeywords.join(', ') : (ex.handoffKeywords || ''),
-        whatsappLanguage: ex.whatsappLanguage === 'lo' ? 'lo' : 'th',
+        whatsappLanguage: 'lo',
       });
       setReceivingAccounts(Array.isArray(ex.receivingAccounts) ? ex.receivingAccounts : []);
     } catch {
       setAi({ isActive: true, model: 'gemini-3.6-flash', temperature: 0.7, systemPrompt: '' });
-      setExt({ welcomeMessage: '', handoffKeywords: '', whatsappLanguage: 'th' });
+      setExt({ welcomeMessage: '', handoffKeywords: '', whatsappLanguage: 'lo' });
       setReceivingAccounts([]);
     } finally {
       setAiLoading(false);
@@ -291,7 +291,7 @@ export default function WhatsAppSettingsPage() {
         channel: 'whatsapp',
         welcomeMessage: ext.welcomeMessage,
         handoffKeywords: ext.handoffKeywords.split(',').map(s => s.trim()).filter(Boolean),
-        whatsappLanguage: ext.whatsappLanguage,
+        whatsappLanguage: 'lo',
         receivingAccounts,
       });
       toast.success('✅ บันทึกการตั้งค่า AI แล้ว');
@@ -582,14 +582,13 @@ export default function WhatsAppSettingsPage() {
                     <label className="label">ภาษาที่ AI ตอบใน WhatsApp</label>
                     <select
                       className="input"
-                      value={ext.whatsappLanguage}
-                      onChange={e => setExt({ ...ext, whatsappLanguage: e.target.value as 'th' | 'lo' })}
+                      value="lo"
+                      disabled
                     >
-                      <option value="th">🇹🇭 ภาษาไทย</option>
                       <option value="lo">🇱🇦 ພາສາລາວ (ภาษาลาว)</option>
                     </select>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: 4 }}>
-                      มีผลเฉพาะข้อความที่ AI ตอบผ่าน WhatsApp ของบริษัทนี้
+                      ระบบบังคับข้อความอัตโนมัติที่ส่งถึงลูกค้าทาง WhatsApp เป็นภาษาลาว
                     </div>
                   </div>
 

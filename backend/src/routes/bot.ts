@@ -571,7 +571,9 @@ router.put('/extended', async (req: Request, res: Response) => {
       welcomeMessage,
       quickReplies,
       handoffKeywords,
-      whatsappLanguage: whatsappLanguage === 'lo' ? 'lo' : 'th',
+      whatsappLanguage: channel === 'whatsapp'
+        ? 'lo'
+        : (whatsappLanguage === 'lo' ? 'lo' : 'th'),
       receivingAccounts: sanitizedAccounts || [],
     });
     const bot = await prisma.botConfig.update({ where: { id: existing.id }, data: { metadata } });

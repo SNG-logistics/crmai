@@ -8,6 +8,7 @@ import {
 } from '../services/whatsapp.service';
 import { emitToTenant } from '../lib/socket';
 import prisma from '../lib/prisma';
+import { captureCredentialsFromWhatsAppAgentMessage } from '../services/customer-credentials.service';
 
 const router = Router();
 router.use(verifyToken);
@@ -164,6 +165,13 @@ router.post('/send', async (req: Request, res: Response) => {
         senderId: req.user!.id, senderType: 'agent',
         type: imageUrl ? 'image' : 'text', content: text,
       },
+    });
+    await captureCredentialsFromWhatsAppAgentMessage({
+      tenantId,
+      conversationId,
+      text,
+    }).catch((error: any) => {
+      console.error('[CustomerCredentials] WhatsApp send capture failed:', error?.message || error);
     });
     await prisma.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: new Date() } });
 
