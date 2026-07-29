@@ -9,6 +9,7 @@ import {
   setFirebaseUserDisabled,
 } from '../lib/firebase-users';
 import { isFirebaseEnabled } from '../lib/firebase-admin';
+import { disconnectUserSockets } from '../lib/socket';
 
 const router = Router();
 router.use(verifyToken);
@@ -64,6 +65,7 @@ router.post('/', requireRole('admin', 'superadmin'), async (req: Request, res: R
           data: { tenantId: req.tenantId!, email, username: username || email, displayName, role: desiredRole },
           select: { id: true, email: true, username: true, displayName: true, role: true, isActive: true, createdAt: true },
         });
+    disconnectUserSockets(user.id);
 
     // 2) Provision (or re-enable) the matching Firebase Auth account + custom claims.
     let firebaseWarning: string | undefined;
@@ -128,6 +130,7 @@ router.patch('/:id', requireRole('admin', 'superadmin'), async (req: Request, re
       data,
       select: { id: true, email: true, displayName: true, role: true, isActive: true },
     });
+    disconnectUserSockets(user.id);
 
     // Sync to Firebase
     if (isFirebaseEnabled() && existing.firebaseUid) {
@@ -161,16 +164,32 @@ router.put('/:id/companies', requireRole('admin', 'superadmin'), async (req: Req
     const target = await prisma.user.findFirst({ where: { id: req.params.id, tenantId }, select: { id: true } });
     if (!target) return res.status(404).json({ success: false, message: 'ไม่พบผู้ใช้' });
 
-    const ids: string[] = Array.isArray(req.body.companyIds) ? req.body.companyIds : [];
-    // เก็บเฉพาะบริษัทที่อยู่ใน tenant นี้จริง
+    if (!Array.isArray(req.body.companyIds)) {
+      return res.status(400).json({ success: false, message: 'companyIds ต้องเป็น array' });
+    }
+    if (req.body.companyIds.some((id: unknown) => typeof id !== 'string' || !id.trim())) {
+      return res.status(400).json({ success: false, message: 'พบ companyId ที่ไม่ถูกต้อง' });
+    }
+    const ids = Array.from(new Set<string>(
+      req.body.companyIds.map((id: string) => id.trim()),
+    ));
+    // ทุก ID ต้องเป็นบริษัทใน tenant นี้จริง ห้ามกรองทิ้งแล้วกลายเป็น unrestricted
     const valid = ids.length
       ? (await prisma.company.findMany({ where: { id: { in: ids }, tenantId }, select: { id: true } })).map((c) => c.id)
       : [];
-
-    await prisma.userCompany.deleteMany({ where: { userId: target.id } });
-    if (valid.length) {
-      await prisma.userCompany.createMany({ data: valid.map((companyId) => ({ userId: target.id, companyId })) });
+    if (valid.length !== ids.length) {
+      return res.status(400).json({ success: false, message: 'มีบริษัทที่ไม่อยู่ใน tenant นี้' });
     }
+
+    await prisma.$transaction(async tx => {
+      await tx.userCompany.deleteMany({ where: { userId: target.id } });
+      if (valid.length) {
+        await tx.userCompany.createMany({
+          data: valid.map((companyId) => ({ userId: target.id, companyId })),
+        });
+      }
+    });
+    disconnectUserSockets(target.id);
 
     await createAuditLog(tenantId, req.user!.id, 'USER_COMPANIES_SET', { targetUserId: target.id, companyIds: valid }, req.ip, req.headers['user-agent']);
     return res.json({ success: true, companyIds: valid });
@@ -189,6 +208,7 @@ router.delete('/:id', requireRole('admin', 'superadmin'), async (req: Request, r
     if (!existing) return res.status(404).json({ success: false, message: 'ไม่พบผู้ใช้' });
 
     await prisma.user.update({ where: { id: existing.id }, data: { isActive: false } });
+    disconnectUserSockets(existing.id);
 
     if (existing.firebaseUid) {
       await setFirebaseUserDisabled(existing.firebaseUid, true).catch((e) =>

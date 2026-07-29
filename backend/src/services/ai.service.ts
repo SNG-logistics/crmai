@@ -463,16 +463,44 @@ export async function processBotMessage(
 }
 
 // ─── AI Reply Suggestion ──────────────────────────────────────────────────────
+export type AdminReplyLanguage = 'th' | 'lo';
+const containsLaoScript = (text: string) => /[\u0E80-\u0EFF]/u.test(text);
+
 export async function generateReplySuggestion(
   conversationHistory: { role: 'user' | 'assistant'; content: string }[],
-  tenantId: string
+  tenantId: string,
+  language: AdminReplyLanguage = 'th',
 ): Promise<string> {
+  const languageInstruction = language === 'lo'
+    ? 'ຕອບເປັນພາສາລາວທຳມະຊາດ ແລະ ໃຊ້ອັກສອນລາວເທົ່ານັ້ນ'
+    : 'ตอบเป็นภาษาไทยธรรมชาติ และใช้อักษรไทย';
   const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
-    { role: 'system', content: 'คุณช่วยแอดมิน CRM แนะนำตอบลูกค้า ตอบแค่ 1 ประโยคสั้นๆ ภาษาไทย' },
+    {
+      role: 'system',
+      content: `คุณเป็นผู้ช่วยแอดมิน CRM แนะนำข้อความตอบลูกค้าแบบสั้น กระชับ ตอบเฉพาะประโยคที่จะส่งเท่านั้น ${languageInstruction}`,
+    },
     ...conversationHistory.slice(-3),
-    { role: 'user', content: 'แนะนำประโยคตอบ (ตอบแค่ประโยคตอบเท่านั้น)' },
+    {
+      role: 'user',
+      content: language === 'lo'
+        ? 'ແນະນຳປະໂຫຍກຕອບ 1 ປະໂຫຍກ (ຕອບສະເພາະຂໍ້ຄວາມທີ່ຈະສົ່ງ)'
+        : 'แนะนำประโยคตอบ 1 ประโยค (ตอบเฉพาะข้อความที่จะส่ง)',
+    },
   ];
-  return await generateAIResponse(messages, LIGHT_MODEL, 0.5, 80);
+  let suggestion = (await generateAIResponse(messages, LIGHT_MODEL, 0.5, 80)).trim();
+  if (language === 'lo' && !containsLaoScript(suggestion)) {
+    suggestion = (await generateAIResponse([
+      {
+        role: 'system',
+        content: 'ຮຽບຮຽງຂໍ້ຄວາມເປັນພາສາລາວທຳມະຊາດ. ຕອບສະເພາະຂໍ້ຄວາມພາສາລາວທີ່ຈະສົ່ງເທົ່ານັ້ນ.',
+      },
+      { role: 'user', content: suggestion },
+    ], LIGHT_MODEL, 0.2, 120)).trim();
+  }
+  if (language === 'lo' && !containsLaoScript(suggestion)) {
+    throw new Error('AI did not return a Lao-language suggestion');
+  }
+  return suggestion;
 }
 
 // ─── AI Draft 3 ตัวเลือก ─────────────────────────────────────────────────────
@@ -489,29 +517,62 @@ export async function generateContextualReply(opts: {
   tone: 'formal' | 'friendly' | 'urgent';
   purpose: 'reply' | 'followup' | 'promotion' | 'apology';
   tenantId: string;
+  language?: AdminReplyLanguage;
 }): Promise<{ suggestions: string[] }> {
-  const { lastCustomerMessage, conversationHistory, contactProfile, tone, purpose } = opts;
+  const { lastCustomerMessage, conversationHistory, contactProfile, tone, purpose, language = 'th' } = opts;
 
-  const toneMap    = { formal: 'สุภาพ', friendly: 'เป็นกันเอง', urgent: 'กระชับ' };
-  const purposeMap = { reply: 'ตอบคำถาม', followup: 'ติดตาม', promotion: 'แนะนำโปรโมชั่น', apology: 'ขอโทษ' };
+  const toneMap = language === 'lo'
+    ? { formal: 'ສຸພາບເປັນທາງການ', friendly: 'ເປັນກັນເອງ', urgent: 'ກະຊັບວ່ອງໄວ' }
+    : { formal: 'สุภาพ', friendly: 'เป็นกันเอง', urgent: 'กระชับ' };
+  const purposeMap = language === 'lo'
+    ? { reply: 'ຕອບຄຳຖາມ', followup: 'ຕິດຕາມ', promotion: 'ແນະນຳໂປຣໂມຊັນ', apology: 'ຂໍໂທດ' }
+    : { reply: 'ตอบคำถาม', followup: 'ติดตาม', promotion: 'แนะนำโปรโมชั่น', apology: 'ขอโทษ' };
+  const outputLanguage = language === 'lo'
+    ? 'ภาษาลาวที่เป็นธรรมชาติ ใช้อักษรลาวเท่านั้น'
+    : 'ภาษาไทยที่เป็นธรรมชาติ ใช้อักษรไทย';
 
-  const systemPrompt = `แอดมิน CRM ไทย ร่างข้อความตอบลูกค้า
+  const systemPrompt = `คุณเป็นผู้ช่วยแอดมิน CRM ร่างข้อความตอบลูกค้า
 โทน: ${toneMap[tone]} | เป้าหมาย: ${purposeMap[purpose]}
 ลูกค้า: ${contactProfile.displayName} ฝากแล้ว ${contactProfile.depositCount || 0} ครั้ง
-กฎ: ตอบ 3 ตัวเลือก คั่นด้วย --- แต่ละตัวไม่เกิน 2 ประโยค ภาษาไทย`;
+กฎ: ตอบ 3 ตัวเลือก คั่นด้วย --- แต่ละตัวไม่เกิน 2 ประโยค และทุกตัวเลือกต้องเป็น${outputLanguage}
+ห้ามอธิบาย ห้ามใส่หัวข้อภาษาอื่น และห้ามแต่งข้อมูลที่ไม่มีในบทสนทนา`;
 
   const messages: { role: 'user' | 'assistant' | 'system'; content: string }[] = [
     { role: 'system', content: systemPrompt },
     ...conversationHistory.slice(-2),
-    { role: 'user', content: `ลูกค้าพูดว่า: "${lastCustomerMessage}" — ร่างตอบ 3 แบบ:` },
+    {
+      role: 'user',
+      content: language === 'lo'
+        ? `ລູກຄ້າເວົ້າວ່າ: "${lastCustomerMessage}" — ຮ່າງຄຳຕອບພາສາລາວ 3 ແບບ:`
+        : `ลูกค้าพูดว่า: "${lastCustomerMessage}" — ร่างคำตอบภาษาไทย 3 แบบ:`,
+    },
   ];
 
-  const raw = await generateAIResponse(messages, LIGHT_MODEL, 0.8, 300);
-
-  const suggestions = raw.split('---')
+  let raw = await generateAIResponse(messages, LIGHT_MODEL, 0.8, 300);
+  let suggestions = raw.split('---')
     .map(s => s.trim())
     .filter(s => s.length > 3)
     .slice(0, 3);
+
+  if (language === 'lo' && suggestions.some(suggestion => !containsLaoScript(suggestion))) {
+    raw = await generateAIResponse([
+      {
+        role: 'system',
+        content: 'ປ່ຽນຄຳຕອບທັງ 3 ແບບໃຫ້ເປັນພາສາລາວທຳມະຊາດ. ຄົງຄວາມໝາຍເດີມ, ຄັ່ນແຕ່ລະຄຳຕອບດ້ວຍ ---, ແລະ ບໍ່ຕ້ອງອະທິບາຍ.',
+      },
+      { role: 'user', content: raw },
+    ], LIGHT_MODEL, 0.2, 350);
+    suggestions = raw.split('---')
+      .map(s => s.trim())
+      .filter(s => s.length > 3)
+      .slice(0, 3);
+  }
+  if (
+    language === 'lo'
+    && (suggestions.length === 0 || suggestions.some(suggestion => !containsLaoScript(suggestion)))
+  ) {
+    throw new Error('AI did not return Lao-language drafts');
+  }
 
   return { suggestions: suggestions.length > 0 ? suggestions : [raw.trim()] };
 }
@@ -552,10 +613,9 @@ export async function detectAndTranslate(text: string): Promise<{ lang: string; 
   }
 }
 
-// ─── Enchant — แปลร่างของแอดมิน (ลาว→ไทย) + แนะนำคำตอบ 3 โทน ──────────────────
-//  แอดมิน (คนลาว) พิมพ์ร่างคำตอบสั้นๆ เป็นภาษาลาว → กดปุ่ม Enchant
-//  AI จะ (1) แปลร่างเป็นไทยให้ดู (2) เขียนคำตอบลูกค้าเป็นไทย 3 แบบ คนละโทน
-//  โดยยึดความหมายจากร่างของแอดมินเท่านั้น ไม่เรียนรู้ข้อมูลจากแชทย้อนหลัง
+// ─── Enchant — เรียบเรียงร่างของแอดมินเป็นภาษาไทย/ลาว + แนะนำ 3 โทน ───────────
+//  AI ยึดความหมายจากร่างของแอดมินเป็นหลัก และใช้ข้อความลูกค้าล่าสุดเป็นบริบท
+//  ภาษาปลายทางถูกเลือกจากหน้า Inbox เพื่อให้ทีมลาวและทีมไทยใช้ flow เดียวกัน
 const ENCHANT_TONES = ['formal', 'friendly', 'urgent'] as const;
 type EnchantTone = (typeof ENCHANT_TONES)[number];
 
@@ -564,30 +624,45 @@ export async function enchantReply(opts: {
   conversationHistory: { role: 'user' | 'assistant'; content: string }[];
   contactProfile?: { displayName?: string; depositCount?: number; memberType?: string };
   tenantId: string;
-}): Promise<{ lang: string; thai: string; suggestions: { tone: EnchantTone; text: string }[] }> {
-  const { adminDraft, conversationHistory, contactProfile } = opts;
+  outputLanguage?: AdminReplyLanguage;
+}): Promise<{
+  lang: string;
+  translation: string;
+  /** @deprecated compatibility alias for older Inbox clients */
+  thai: string;
+  outputLanguage: AdminReplyLanguage;
+  suggestions: { tone: EnchantTone; text: string }[];
+}> {
+  const {
+    adminDraft,
+    conversationHistory,
+    contactProfile,
+    outputLanguage = 'th',
+  } = opts;
+  const targetLanguageName = outputLanguage === 'lo' ? 'ภาษาลาว' : 'ภาษาไทย';
 
   // ข้อความลูกค้าล่าสุด (บริบทของสิ่งที่กำลังตอบ)
   const lastCustomer = [...conversationHistory].reverse().find(m => m.role === 'user')?.content || '';
-  const systemPrompt = `คุณเป็นผู้ช่วยทีมแอดมิน CRM ที่ตอบลูกค้าภาษาไทย แอดมินเป็นคนลาว พิมพ์ "ร่างคำตอบ" สั้นๆ (มักเป็นภาษาลาว)
+  const systemPrompt = `คุณเป็นผู้ช่วยทีมแอดมิน CRM และต้องสร้างข้อความตอบลูกค้าเป็น${targetLanguageName}
 หน้าที่ของคุณ:
-1. ตรวจภาษาของร่าง แล้วแปลความหมายของร่างเป็นภาษาไทย
-2. เขียนข้อความ "ตอบลูกค้า" เป็นภาษาไทย 3 แบบ แบบละโทน:
+1. ตรวจภาษาต้นฉบับของ "ร่างคำตอบ" แล้วแปลหรือเรียบเรียงร่างเป็น${targetLanguageName}
+2. เขียนข้อความ "ตอบลูกค้า" เป็น${targetLanguageName} 3 แบบ แบบละโทน:
    - formal = สุภาพทางการ
    - friendly = เป็นกันเอง อบอุ่น
    - urgent = กระชับ รวดเร็ว
 
 กฎเหล็ก:
 - ทั้ง 3 คำตอบต้องสื่อ "ความหมายเดียวกับร่างของแอดมิน" ห้ามแต่งข้อมูล ตัวเลข โปรโมชั่น หรือเนื้อหาที่ร่างไม่ได้พูดถึง
+- ค่า translation และข้อความใน suggestions ทุกข้อความต้องเป็น${targetLanguageName}เท่านั้น
 - เขียนภาษาพูดธรรมชาติ แต่ละแบบไม่เกิน 2-3 ประโยค ใส่ emoji ได้เล็กน้อย
 - ตอบกลับเป็น JSON เท่านั้น รูปแบบ:
-{"lang":"ชื่อภาษาต้นฉบับของร่าง","thai":"คำแปลร่างเป็นไทย","suggestions":[{"tone":"formal","text":"..."},{"tone":"friendly","text":"..."},{"tone":"urgent","text":"..."}]}`;
+{"lang":"ชื่อภาษาต้นฉบับของร่าง","translation":"ร่างที่แปลหรือเรียบเรียงเป็นภาษาปลายทาง","suggestions":[{"tone":"formal","text":"..."},{"tone":"friendly","text":"..."},{"tone":"urgent","text":"..."}]}`;
 
   const userParts: string[] = [];
   if (lastCustomer) userParts.push(`ข้อความล่าสุดจากลูกค้า: "${lastCustomer}"`);
   if (contactProfile?.displayName) userParts.push(`ลูกค้า: ${contactProfile.displayName}`);
   userParts.push(`ร่างคำตอบของแอดมิน (ภาษาต้นฉบับ): "${adminDraft}"`);
-  userParts.push('โปรดแปลร่างเป็นไทย และสร้างคำตอบ 3 โทน ตามรูปแบบ JSON');
+  userParts.push(`โปรดเรียบเรียงร่างเป็น${targetLanguageName} และสร้างคำตอบ${targetLanguageName} 3 โทน ตามรูปแบบ JSON`);
 
   try {
     const response = await client.chat.completions.create({
@@ -611,18 +686,66 @@ export async function enchantReply(opts: {
         text: s.text.trim(),
       }))
       .slice(0, 3);
+    const translation = (
+      typeof parsed.translation === 'string'
+        ? parsed.translation
+        : (typeof parsed.thai === 'string' ? parsed.thai : adminDraft)
+    ).trim();
+    if (
+      outputLanguage === 'lo'
+      && (
+        !containsLaoScript(translation)
+        || suggestions.length === 0
+        || suggestions.some(suggestion => !containsLaoScript(suggestion.text))
+      )
+    ) {
+      throw new Error('Enchant did not return Lao-language content');
+    }
 
     return {
       lang: parsed.lang || 'ลาว',
-      thai: (parsed.thai || adminDraft).trim(),
+      translation,
+      thai: translation,
+      outputLanguage,
       suggestions: suggestions.length
         ? suggestions
-        : [{ tone: 'friendly', text: (parsed.thai || adminDraft).trim() }],
+        : [{ tone: 'friendly', text: translation }],
     };
   } catch {
-    // fallback: แปลอย่างเดียว ถ้า AI/JSON ล่ม
-    const t = await detectAndTranslate(adminDraft);
-    return { lang: t.lang, thai: t.thai, suggestions: [{ tone: 'friendly', text: t.thai }] };
+    // fallback: ใช้ตัวแปลเดิมสำหรับภาษาไทย และขอข้อความลาวแบบสั้นสำหรับภาษาลาว
+    if (outputLanguage === 'th') {
+      const translated = await detectAndTranslate(adminDraft);
+      return {
+        lang: translated.lang,
+        translation: translated.thai,
+        thai: translated.thai,
+        outputLanguage,
+        suggestions: [{ tone: 'friendly', text: translated.thai }],
+      };
+    }
+
+    let laoText = adminDraft;
+    try {
+      laoText = (await generateAIResponse([
+        {
+          role: 'system',
+          content: 'ແປ ຫຼື ຮຽບຮຽງຂໍ້ຄວາມໃຫ້ເປັນພາສາລາວທຳມະຊາດ. ຕອບສະເພາະຂໍ້ຄວາມພາສາລາວເທົ່ານັ້ນ.',
+        },
+        { role: 'user', content: adminDraft.slice(0, 1000) },
+      ], LIGHT_MODEL, 0.2, 250)).trim() || adminDraft;
+    } catch {
+      // Keep the admin draft usable even when the fallback model is unavailable.
+    }
+    if (!containsLaoScript(laoText)) {
+      throw new Error('ไม่สามารถสร้างคำตอบภาษาลาวได้ กรุณาลองใหม่อีกครั้ง');
+    }
+    return {
+      lang: 'ไม่ทราบ',
+      translation: laoText,
+      thai: laoText,
+      outputLanguage,
+      suggestions: [{ tone: 'friendly', text: laoText }],
+    };
   }
 }
 

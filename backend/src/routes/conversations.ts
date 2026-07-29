@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import prisma from '../lib/prisma';
 import { getChannelConfig } from '../lib/channel-config';
 import { verifyToken } from '../middleware/auth';
-import { emitToTenant, emitToConversation } from '../lib/socket';
+import { emitToTenant } from '../lib/socket';
 import { generateReplySuggestion, generateContextualReply, summarizeConversation, detectAndTranslate, enchantReply } from '../services/ai.service';
 import { sendLineReply, sendLinePush, lineTextMessage } from '../services/line.service';
 import { sendTelegramMessage } from '../services/telegram.service';
@@ -17,7 +17,9 @@ router.use(verifyToken);
 router.get('/', async (req: Request, res: Response) => {
   try {
     const { status, channel, assignedTo, search, companyId, page = '1', limit = '30' } = req.query;
-    const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
+    const pageNumber = Math.max(1, parseInt(page as string, 10) || 1);
+    const pageSize = Math.min(100, Math.max(1, parseInt(limit as string, 10) || 30));
+    const skip = (pageNumber - 1) * pageSize;
     const where: any = { tenantId: req.tenantId };
 
     // ─── Company scope: จำกัดตามบริษัทที่แอดมินคนนี้เข้าถึงได้ ───────────────────
@@ -26,7 +28,7 @@ router.get('/', async (req: Request, res: Response) => {
     // ตัวกรองบริษัทจาก UI (ต้องอยู่ในสิทธิ์ที่เข้าถึงได้)
     if (companyId && companyId !== 'all') {
       if (allowed && !allowed.includes(companyId as string)) {
-        return res.json({ success: true, conversations: [], total: 0, page: parseInt(page as string), limit: parseInt(limit as string) });
+        return res.json({ success: true, conversations: [], total: 0, page: pageNumber, limit: pageSize });
       }
       where.companyId = companyId;
     }
@@ -37,23 +39,88 @@ router.get('/', async (req: Request, res: Response) => {
     else if (assignedTo) where.assignedToId = assignedTo;
     if (search) where.contact = { displayName: { contains: search, mode: 'insensitive' } };
 
-    const [conversations, total] = await Promise.all([
-      prisma.conversation.findMany({
-        where,
-        include: {
-          contact: { select: { id: true, displayName: true, avatar: true, lineUserId: true, telegramId: true, whatsappId: true, phone: true } },
-          assignedTo: { select: { id: true, displayName: true, avatar: true } },
-          company: { select: { id: true, name: true } },
-          messages: { orderBy: { createdAt: 'desc' }, take: 1 },
-        },
-        orderBy: { lastMessageAt: 'desc' },
-        skip,
-        take: parseInt(limit as string),
-      }),
-      prisma.conversation.count({ where }),
-    ]);
+    // Sort by the customer's latest incoming activity, not by bot/agent replies.
+    // This keeps an automated response from moving a room above a newer customer chat.
+    const candidates = await prisma.conversation.findMany({
+      where,
+      select: { id: true, lastMessageAt: true, createdAt: true },
+    });
+    const incomingActivity = candidates.length
+      ? await prisma.message.groupBy({
+          by: ['conversationId'],
+          where: { senderType: 'customer', conversation: { is: where } },
+          _max: { createdAt: true },
+        })
+      : [];
+    const incomingByConversation = new Map(
+      incomingActivity.map(activity => [activity.conversationId, activity._max.createdAt]),
+    );
 
-    res.json({ success: true, conversations, total, page: parseInt(page as string), limit: parseInt(limit as string) });
+    candidates.sort((left, right) => {
+      const leftIncoming = incomingByConversation.get(left.id)?.getTime() || 0;
+      const rightIncoming = incomingByConversation.get(right.id)?.getTime() || 0;
+      const incomingDelta = rightIncoming - leftIncoming;
+      if (incomingDelta !== 0) return incomingDelta;
+
+      // lastMessageAt is only a fallback for rooms with no customer activity.
+      // It must never let a bot reply reorder two customer conversations.
+      if (!leftIncoming && !rightIncoming) {
+        const lastMessageDelta =
+          (right.lastMessageAt?.getTime() || 0)
+          - (left.lastMessageAt?.getTime() || 0);
+        if (lastMessageDelta !== 0) return lastMessageDelta;
+      }
+
+      const createdDelta = right.createdAt.getTime() - left.createdAt.getTime();
+      if (createdDelta !== 0) return createdDelta;
+      return left.id.localeCompare(right.id);
+    });
+
+    const pageIds = candidates.slice(skip, skip + pageSize).map(conversation => conversation.id);
+    let pageRows: any[] = [];
+    let unreadMessageRows: { id: string; conversationId: string }[] = [];
+    if (pageIds.length) {
+      [pageRows, unreadMessageRows] = await Promise.all([
+        prisma.conversation.findMany({
+          where: { ...where, id: { in: pageIds } },
+          include: {
+            contact: { select: { id: true, displayName: true, avatar: true, lineUserId: true, telegramId: true, whatsappId: true, phone: true } },
+            assignedTo: { select: { id: true, displayName: true, avatar: true } },
+            company: { select: { id: true, name: true } },
+            messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+          },
+        }),
+        prisma.message.findMany({
+          where: {
+            conversationId: { in: pageIds },
+            tenantId: req.tenantId,
+            senderType: 'customer',
+            isRead: false,
+          },
+          select: { id: true, conversationId: true },
+        }),
+      ]);
+    }
+    const unreadIdsByConversation = new Map<string, string[]>();
+    for (const message of unreadMessageRows) {
+      const ids = unreadIdsByConversation.get(message.conversationId) || [];
+      ids.push(message.id);
+      unreadIdsByConversation.set(message.conversationId, ids);
+    }
+    const pageRowsById = new Map(pageRows.map(conversation => [conversation.id, conversation]));
+    const conversations = pageIds.flatMap(id => {
+      const row = pageRowsById.get(id);
+      if (!row) return [];
+      const unreadMessageIds = unreadIdsByConversation.get(id) || [];
+      return [{
+        ...row,
+        _unread: unreadMessageIds.length,
+        _unreadMessageIds: unreadMessageIds,
+        lastCustomerMessageAt: incomingByConversation.get(id) || null,
+      }];
+    });
+
+    res.json({ success: true, conversations, total: candidates.length, page: pageNumber, limit: pageSize });
   } catch (err) {
     res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' });
   }
@@ -357,11 +424,63 @@ router.get('/:id', async (req: Request, res: Response) => {
       };
       return { ...message, metadata: JSON.stringify(metadata) };
     });
-    // Mark messages as read
-    await prisma.message.updateMany({ where: { conversationId: req.params.id, isRead: false, senderType: 'customer' }, data: { isRead: true } });
     res.json({ success: true, conversation: { ...conversation, messages: enrichedMessages } });
   } catch (err) {
     res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' });
+  }
+});
+
+/** POST /api/conversations/:id/read - clear unread from an authenticated human view */
+router.post('/:id/read', async (req: Request, res: Response) => {
+  try {
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: req.params.id, tenantId: req.tenantId },
+      select: { id: true, companyId: true },
+    });
+    if (!conversation) {
+      return res.status(404).json({ success: false, message: 'Conversation not found' });
+    }
+
+    const allowed = await getUserCompanyIds(req.user!.id);
+    if (!canAccessCompany(allowed, conversation.companyId)) {
+      return res.status(403).json({ success: false, message: 'You cannot access this conversation' });
+    }
+
+    // Capture the exact message ids being acknowledged. The ids make the
+    // client update commutative with a concurrently delivered new_message
+    // event, so a newer customer message cannot be cleared accidentally.
+    const readMessageIds = await prisma.$transaction(async tx => {
+      const unreadMessages = await tx.message.findMany({
+        where: {
+          conversationId: conversation.id,
+          tenantId: req.tenantId,
+          senderType: 'customer',
+          isRead: false,
+        },
+        select: { id: true },
+      });
+      if (unreadMessages.length === 0) return [];
+      const ids = unreadMessages.map(message => message.id);
+      await tx.message.updateMany({
+        where: { id: { in: ids }, tenantId: req.tenantId, isRead: false },
+        data: { isRead: true },
+      });
+      return ids;
+    });
+    const readPayload = {
+      success: true,
+      conversationId: conversation.id,
+      companyId: conversation.companyId,
+      readByUserId: req.user!.id,
+      readCount: readMessageIds.length,
+      readMessageIds,
+    };
+    if (readMessageIds.length > 0) {
+      emitToTenant(req.tenantId!, 'conversation_read', readPayload);
+    }
+    return res.json(readPayload);
+  } catch (err) {
+    return res.status(500).json({ success: false, message: 'Failed to mark conversation as read' });
   }
 });
 
@@ -452,8 +571,12 @@ router.post('/:id/messages', async (req: Request, res: Response) => {
     await prisma.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: new Date() } });
 
     const fullMessage = { ...message, sender: { id: req.user!.id, displayName: req.user!.displayName } };
-    emitToTenant(req.tenantId!, 'new_message', { conversationId: conversation.id, message: fullMessage, channel: conversation.channel });
-    emitToConversation(conversation.id, 'new_message', { message: fullMessage });
+    emitToTenant(req.tenantId!, 'new_message', {
+      conversationId: conversation.id,
+      companyId: conversation.companyId,
+      message: fullMessage,
+      channel: conversation.channel,
+    });
 
     res.json({ success: true, message: fullMessage });
   } catch (err) {
@@ -487,16 +610,26 @@ router.post('/:id/handoff', async (req: Request, res: Response) => {
 /** GET /api/conversations/:id/ai-suggest - AI reply suggestion */
 router.get('/:id/ai-suggest', async (req: Request, res: Response) => {
   try {
+    const language = req.query.language === 'lo' ? 'lo' : 'th';
+    const conversation = await prisma.conversation.findFirst({
+      where: { id: req.params.id, tenantId: req.tenantId },
+      select: { companyId: true },
+    });
+    if (!conversation) return res.status(404).json({ success: false, message: 'ไม่พบบทสนทนา' });
+    const allowed = await getUserCompanyIds(req.user!.id);
+    if (!canAccessCompany(allowed, conversation.companyId)) {
+      return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์เข้าถึงบทสนทนาของบริษัทนี้' });
+    }
     const messages = await prisma.message.findMany({
       where: { conversationId: req.params.id, tenantId: req.tenantId },
-      orderBy: { createdAt: 'asc' }, take: 20,
+      orderBy: { createdAt: 'desc' }, take: 20,
     });
-    const history = messages.map((m: any) => ({
+    const history = [...messages].reverse().map((m: any) => ({
       role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const,
       content: m.content,
     }));
-    const suggestion = await generateReplySuggestion(history, req.tenantId!);
-    res.json({ success: true, suggestion });
+    const suggestion = await generateReplySuggestion(history, req.tenantId!, language);
+    res.json({ success: true, suggestion, language });
   } catch { res.status(500).json({ success: false, message: 'เกิดข้อผิดพลาด' }); }
 });
 
@@ -504,21 +637,27 @@ router.get('/:id/ai-suggest', async (req: Request, res: Response) => {
 router.post('/:id/ai-draft', async (req: Request, res: Response) => {
   try {
     const { tone = 'friendly', purpose = 'reply' } = req.body;
+    const language = req.body?.language === 'lo' ? 'lo' : 'th';
 
     const conv = await prisma.conversation.findFirst({
       where: { id: req.params.id, tenantId: req.tenantId },
       include: {
         contact: true,
-        messages: { orderBy: { createdAt: 'asc' }, take: 20 },
+        messages: { orderBy: { createdAt: 'desc' }, take: 20 },
       },
     });
     if (!conv) return res.status(404).json({ success: false, message: 'ไม่พบบทสนทนา' });
+    const allowed = await getUserCompanyIds(req.user!.id);
+    if (!canAccessCompany(allowed, conv.companyId)) {
+      return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์เข้าถึงบทสนทนาของบริษัทนี้' });
+    }
 
-    const history = (conv.messages as any[]).map(m => ({
+    const chronologicalMessages = [...(conv.messages as any[])].reverse();
+    const history = chronologicalMessages.map(m => ({
       role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const,
       content: m.content,
     }));
-    const lastCustomerMsg = (conv.messages as any[]).filter((m: any) => m.senderType === 'customer').slice(-1)[0]?.content || '';
+    const lastCustomerMsg = chronologicalMessages.filter((m: any) => m.senderType === 'customer').slice(-1)[0]?.content || '';
 
     const contact: any = conv.contact;
     const result = await generateContextualReply({
@@ -531,29 +670,34 @@ router.post('/:id/ai-draft', async (req: Request, res: Response) => {
         depositCount: contact.depositCount,
         memberType: contact.memberType,
       },
-      tone, purpose, tenantId: req.tenantId!,
+      tone, purpose, tenantId: req.tenantId!, language,
     });
 
-    res.json({ success: true, ...result });
+    res.json({ success: true, language, ...result });
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
 });
 
-/** POST /api/conversations/:id/enchant — แปลร่างภาษาลาว→ไทย + แนะนำคำตอบ 3 โทน
- *  Body: { draft: "<ร่างที่แอดมินพิมพ์ มักเป็นภาษาลาว>" }
- *  Resp: { lang, thai, suggestions: [{ tone, text }] }
+/** POST /api/conversations/:id/enchant — เรียบเรียงร่างเป็นไทย/ลาว + แนะนำคำตอบ 3 โทน
+ *  Body: { draft: "<ร่างที่แอดมินพิมพ์>", language: "th" | "lo" }
+ *  Resp: { lang, translation, outputLanguage, suggestions: [{ tone, text }] }
  */
 router.post('/:id/enchant', async (req: Request, res: Response) => {
   try {
     const draft = (req.body?.draft || '').toString();
+    const language = req.body?.language === 'lo' ? 'lo' : 'th';
     if (!draft.trim()) return res.status(400).json({ success: false, message: 'กรุณาพิมพ์ร่างคำตอบก่อน' });
 
     const conv = await prisma.conversation.findFirst({
       where: { id: req.params.id, tenantId: req.tenantId },
-      include: { contact: true, messages: { orderBy: { createdAt: 'asc' }, take: 20 } },
+      include: { contact: true, messages: { orderBy: { createdAt: 'desc' }, take: 20 } },
     });
     if (!conv) return res.status(404).json({ success: false, message: 'ไม่พบบทสนทนา' });
+    const allowed = await getUserCompanyIds(req.user!.id);
+    if (!canAccessCompany(allowed, conv.companyId)) {
+      return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์เข้าถึงบทสนทนาของบริษัทนี้' });
+    }
 
-    const history = (conv.messages as any[]).map(m => ({
+    const history = [...(conv.messages as any[])].reverse().map(m => ({
       role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const,
       content: m.content,
     }));
@@ -564,9 +708,10 @@ router.post('/:id/enchant', async (req: Request, res: Response) => {
       conversationHistory: history,
       contactProfile: { displayName: contact.displayName, depositCount: contact.depositCount, memberType: contact.memberType },
       tenantId: req.tenantId!,
+      outputLanguage: language,
     });
 
-    res.json({ success: true, ...result });
+    res.json({ success: true, language, ...result });
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }
 });
 
@@ -587,12 +732,16 @@ router.get('/:id/summary', async (req: Request, res: Response) => {
       where: { id: req.params.id, tenantId: req.tenantId },
       include: {
         contact: { select: { displayName: true } },
-        messages: { orderBy: { createdAt: 'asc' }, take: 30 },
+        messages: { orderBy: { createdAt: 'desc' }, take: 30 },
       },
     });
     if (!conv) return res.status(404).json({ success: false, message: 'ไม่พบบทสนทนา' });
+    const allowed = await getUserCompanyIds(req.user!.id);
+    if (!canAccessCompany(allowed, conv.companyId)) {
+      return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์เข้าถึงบทสนทนาของบริษัทนี้' });
+    }
 
-    const history = (conv.messages as any[]).map(m => ({
+    const history = [...(conv.messages as any[])].reverse().map(m => ({
       role: m.senderType === 'customer' ? 'user' as const : 'assistant' as const,
       content: m.content,
     }));
@@ -627,6 +776,10 @@ router.post('/:id/sync-line', async (req: Request, res: Response) => {
     });
 
     if (!conv) return res.status(404).json({ success: false, message: 'ไม่พบบทสนทนา' });
+    const allowed = await getUserCompanyIds(req.user!.id);
+    if (!canAccessCompany(allowed, conv.companyId)) {
+      return res.status(403).json({ success: false, message: 'ไม่มีสิทธิ์เข้าถึงบทสนทนาของบริษัทนี้' });
+    }
     if (conv.channel !== 'line') {
       return res.status(400).json({ success: false, message: 'Sync รองรับเฉพาะ LINE channel' });
     }

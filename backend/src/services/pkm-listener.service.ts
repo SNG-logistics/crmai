@@ -178,6 +178,7 @@ async function handleTransactionEvent(type: 'withdraw' | 'deposit', data: any) {
 
         // Emit real-time update ไปยัง CRM inbox
         emitToTenant(ch.tenantId, 'pkm:transaction', {
+          companyId: ch.companyId,
           type, amount, pf, username,
           contactId: contact.id,
           contactName: contact.displayName,
@@ -193,7 +194,10 @@ async function handleTransactionEvent(type: 'withdraw' | 'deposit', data: any) {
         console.log(`[PKM] ✅ Updated ${contact.displayName}: ${type} ฿${amount}`);
       } else {
         // ไม่พบ contact แต่ยัง notify
-        emitToTenant(ch.tenantId, 'pkm:unknown_member', { type, amount, pf, username, phone });
+        emitToTenant(ch.tenantId, 'pkm:unknown_member', {
+          companyId: ch.companyId,
+          type, amount, pf, username, phone,
+        });
       }
     } catch (e: any) {
       console.error(`[PKM] Error updating contact:`, e.message);
@@ -205,14 +209,20 @@ async function handleTransactionEvent(type: 'withdraw' | 'deposit', data: any) {
 async function handleUnknownMemberEvent(event: string, data: any) {
   const channels = await prisma.channelConfig.findMany({ where: { channel: 'pkm', isActive: true } }).catch(() => []);
   for (const ch of channels) {
-    emitToTenant(ch.tenantId, 'pkm:raw_event', { event, data, ts: new Date().toISOString() });
+    emitToTenant(ch.tenantId, 'pkm:raw_event', {
+      companyId: ch.companyId,
+      event, data, ts: new Date().toISOString(),
+    });
   }
 }
 
 async function broadcastPkmEvent(type: string, data: any) {
   const channels = await prisma.channelConfig.findMany({ where: { channel: 'pkm', isActive: true } }).catch(() => []);
   for (const ch of channels) {
-    emitToTenant(ch.tenantId, 'pkm:transaction', { type, ...data, ts: new Date().toISOString() });
+    emitToTenant(ch.tenantId, 'pkm:transaction', {
+      companyId: ch.companyId,
+      type, ...data, ts: new Date().toISOString(),
+    });
   }
 }
 

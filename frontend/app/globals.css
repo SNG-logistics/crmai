@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Kanit:wght@300;400;500;600;700&family=Noto+Sans+Lao:wght@300;400;500;600;700&display=swap');
 
 :root {
   --bg-primary: #070913;
@@ -40,7 +40,7 @@
 html { font-size: 15px; -webkit-font-smoothing: antialiased; }
 
 body {
-  font-family: 'Kanit', 'Inter', sans-serif;
+  font-family: 'Noto Sans Lao', 'Kanit', 'Inter', sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
   min-height: 100vh;
