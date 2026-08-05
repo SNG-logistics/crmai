@@ -449,7 +449,11 @@ router.post('/:id/read', async (req: Request, res: Response) => {
     // Capture the exact message ids being acknowledged. The ids make the
     // client update commutative with a concurrently delivered new_message
     // event, so a newer customer message cannot be cleared accidentally.
-    const readMessageIds = await prisma.$transaction(async tx => {
+    // remainingUnread is counted after the update inside the same transaction:
+    // it is the authoritative badge value, so a client whose local counter has
+    // drifted (message already marked read elsewhere, missed socket event) can
+    // reset to the truth instead of decrementing forever toward a stuck badge.
+    const { readMessageIds, remainingUnread } = await prisma.$transaction(async tx => {
       const unreadMessages = await tx.message.findMany({
         where: {
           conversationId: conversation.id,
@@ -459,13 +463,22 @@ router.post('/:id/read', async (req: Request, res: Response) => {
         },
         select: { id: true },
       });
-      if (unreadMessages.length === 0) return [];
       const ids = unreadMessages.map(message => message.id);
-      await tx.message.updateMany({
-        where: { id: { in: ids }, tenantId: req.tenantId, isRead: false },
-        data: { isRead: true },
+      if (ids.length > 0) {
+        await tx.message.updateMany({
+          where: { id: { in: ids }, tenantId: req.tenantId, isRead: false },
+          data: { isRead: true },
+        });
+      }
+      const remaining = await tx.message.count({
+        where: {
+          conversationId: conversation.id,
+          tenantId: req.tenantId,
+          senderType: 'customer',
+          isRead: false,
+        },
       });
-      return ids;
+      return { readMessageIds: ids, remainingUnread: remaining };
     });
     const readPayload = {
       success: true,
@@ -474,6 +487,7 @@ router.post('/:id/read', async (req: Request, res: Response) => {
       readByUserId: req.user!.id,
       readCount: readMessageIds.length,
       readMessageIds,
+      remainingUnread,
     };
     if (readMessageIds.length > 0) {
       emitToTenant(req.tenantId!, 'conversation_read', readPayload);

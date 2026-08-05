@@ -741,18 +741,24 @@ export default function InboxPage() {
     setTotalUnread(conversations.filter(c => (c._unread ?? 0) > 0).length);
   }, [conversations]);
 
-  const applyConversationRead = useCallback((data: any) => {
+  // The badge is recomputed from the room's remaining unread-id set instead of
+  // being decremented. Decrementing leaves a stuck number whenever the local
+  // counter and the server disagree (message already read on another device, a
+  // missed socket event). Resetting to the set size cannot drift, and ids that
+  // arrive while the read request is in flight stay counted, so a customer who
+  // writes again immediately still raises a fresh badge.
+  const applyConversationRead = useCallback((data: any, idsKnownAtRequest?: Set<string>) => {
+    const conversationId = data?.conversationId;
+    if (!conversationId) return;
     const ids: string[] = Array.isArray(data?.readMessageIds)
       ? data.readMessageIds.filter((id: unknown): id is string => typeof id === 'string')
       : [];
-    const newlyReadIds = ids.filter((id: string) => !readMessageIdsRef.current.has(id));
-    if (newlyReadIds.length === 0) return;
-    conversationEventRevisionRef.current += 1;
-    const knownUnreadIds = unreadMessageIdsByConversationRef.current.get(data.conversationId);
-    const acknowledgedUnreadIds = knownUnreadIds
-      ? newlyReadIds.filter((id: string) => knownUnreadIds.has(id))
-      : [];
-    newlyReadIds.forEach((id: string) => {
+    const serverRemaining = typeof data?.remainingUnread === 'number'
+      ? Math.max(0, data.remainingUnread)
+      : null;
+    const knownUnreadIds = unreadMessageIdsByConversationRef.current.get(conversationId);
+
+    ids.forEach((id: string) => {
       readMessageIdsRef.current.add(id);
       knownUnreadIds?.delete(id);
     });
@@ -761,22 +767,35 @@ export default function InboxPage() {
         Array.from(readMessageIdsRef.current).slice(-2500),
       );
     }
-    if (acknowledgedUnreadIds.length > 0) {
-      setConversations(previous => previous.map(conversation =>
-        conversation.id === data.conversationId
-          ? {
-              ...conversation,
-              _unread: Math.max(0, (conversation._unread || 0) - acknowledgedUnreadIds.length),
-            }
-          : conversation
-      ));
+
+    // Server says nothing is left unread. Drop every id the room already held
+    // when the request went out — including ids the server never listed because
+    // they were flagged read elsewhere. Ids added mid-flight are newer than the
+    // server snapshot, so they survive and keep the badge honest.
+    if (serverRemaining === 0 && knownUnreadIds) {
+      if (idsKnownAtRequest) idsKnownAtRequest.forEach(id => knownUnreadIds.delete(id));
+      else knownUnreadIds.clear();
     }
+
+    const nextUnread = knownUnreadIds ? knownUnreadIds.size : (serverRemaining ?? 0);
+    conversationEventRevisionRef.current += 1;
+    setConversations(previous => {
+      const index = previous.findIndex(conversation => conversation.id === conversationId);
+      if (index === -1 || (previous[index]._unread ?? 0) === nextUnread) return previous;
+      const next = [...previous];
+      next[index] = { ...next[index], _unread: nextUnread };
+      return next;
+    });
   }, []);
 
   const markConversationRead = useCallback(async (id: string) => {
+    // Snapshot before the request so the response can clear exactly these ids.
+    const idsKnownAtRequest = new Set(
+      unreadMessageIdsByConversationRef.current.get(id) || [],
+    );
     try {
       const response = await api.post(`/conversations/${id}/read`);
-      applyConversationRead(response.data);
+      applyConversationRead(response.data, idsKnownAtRequest);
     } catch {
       await loadConversations();
     }
@@ -880,12 +899,15 @@ export default function InboxPage() {
     setExternalReplyWarning(false); // reset warning เมื่อเปลี่ยน conversation
     getSocket()?.emit('join:conversation', conv.id);
     void loadMessages(conv.id).then(loaded => {
+      // Opening a room is an explicit read: the admin clicked it and the
+      // messages are on screen. Only visibility is checked here — requiring
+      // document.hasFocus() left the badge stuck whenever the browser reported
+      // the window as unfocused (devtools, embedded view, click-through).
       if (
         loaded
         && activeConvRef.current === conv.id
         && loadedConversationRef.current === conv.id
         && document.visibilityState === 'visible'
-        && document.hasFocus()
       ) {
         void markConversationRead(conv.id);
       }

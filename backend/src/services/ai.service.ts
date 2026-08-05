@@ -114,6 +114,31 @@ function scoreKB(kb: SearchableKnowledge, userMessage: string): number {
   return score;
 }
 
+// ─── Withdrawal notice — คำตอบตายตัว ไม่ผ่าน LLM ───────────────────────────────
+//  ปัญหาเดิม: ลูกค้าแจ้งถอน แล้ว LLM เรียบเรียงคำตอบใหม่ทุกครั้ง → ข้อความเพี้ยน
+//  แก้: ถ้าบอทนี้มีความรู้หมวด "withdraw_notice" อยู่ ให้ตอบข้อความนั้นตรงๆ
+//  บอทที่ไม่ได้ตั้งความรู้หมวดนี้ไว้ พฤติกรรมเดิมไม่เปลี่ยน
+export const WITHDRAW_NOTICE_CATEGORY = 'withdraw_notice';
+
+// ลูกค้า "แจ้ง" ว่าถอน (ไทย/ลาว/อังกฤษ)
+const WITHDRAW_NOTICE_TERMS =
+  /(แจ้งถอน|ขอถอน|กดถอน|ถอนแล้ว|ถอนเงิน|ถอนเครดิต|ถอน|ແຈ້ງຖອນ|ຂໍຖອນ|ກົດຖອນ|ຖອນແລ້ວ|ຖອນເງິນ|ຖອນເຄດິດ|ຖອນ|withdraw)/iu;
+
+// ถ้าเป็น "คำถาม" หรือ "แจ้งปัญหา" ต้องไม่ตอบตายตัว — ปล่อยให้ AI/แอดมินจัดการ
+const WITHDRAW_QUESTION_TERMS =
+  /(\?|\?|ยังไง|อย่างไร|ไง|วิธี|เท่าไหร่|เท่าไร|กี่|ขั้นต่ำ|ขั้นสูง|ไม่ได้|ไม่เข้า|ยังไม่|ค้าง|นาน|เมื่อไหร่|เมื่อไร|ทำไม|ช่วย|ผิด|error|ແນວໃດ|ວິທີ|ຈັກ|ເທົ່າໃດ|ຂັ້ນຕ່ຳ|ບໍ່ໄດ້|ບໍ່ເຂົ້າ|ຍັງບໍ່|ຄ້າງ|ດົນ|ເມື່ອໃດ|ເປັນຫຍັງ|ຊ່ວຍ)/iu;
+
+const WITHDRAW_NOTICE_MAX_CHARS = 160; // แจ้งถอนเป็นข้อความสั้น ไม่ใช่ข้อความบรรยายยาว
+
+/** true = ข้อความนี้คือการ "แจ้งถอน" ล้วนๆ (ไม่ใช่คำถาม/แจ้งปัญหาเรื่องถอน) */
+export function isWithdrawalNotice(userMessage: string): boolean {
+  const text = (userMessage || '').trim();
+  if (!text || text.length > WITHDRAW_NOTICE_MAX_CHARS) return false;
+  if (!WITHDRAW_NOTICE_TERMS.test(text)) return false;
+  if (WITHDRAW_QUESTION_TERMS.test(text)) return false;
+  return true;
+}
+
 const MAX_HISTORY = 10; // จำบริบทได้ยาวขึ้น — ลูกค้าถามต่อเนื่องแล้วบอทไม่ลืมเรื่องเดิม
 const MIN_KB_MATCH_SCORE = 3.5; // ต้องมี intent/ข้อความทับซ้อนชัดเจน ป้องกัน FAQ ไม่เกี่ยวข้องหลุดเข้า prompt
 const MIN_VISUAL_IMAGE_SCORE = 6; // ส่งรูปเฉพาะเมื่อความรู้จากรูปตรงกับคำถามอย่างชัดเจน
@@ -322,6 +347,18 @@ export async function processBotMessage(
     // เก็บความรู้ได้ไม่จำกัด แต่คัดเฉพาะรายการที่เกี่ยวข้องก่อนส่งเข้า prompt
     include: { knowledgeBase: { where: { isActive: true } } },
   });
+
+  // ⚡ WITHDRAW NOTICE deterministic pre-check — ต้องตอบเหมือนเดิมทุกครั้ง
+  //  ลูกค้าแจ้งถอน → ส่งข้อความยืนยันจากความรู้หมวด withdraw_notice ตรงๆ ไม่ผ่าน LLM
+  if (isWithdrawalNotice(userMessage)) {
+    const notice = (botConfig?.knowledgeBase || []).find(
+      kb => kb.category === WITHDRAW_NOTICE_CATEGORY && (kb.answer || '').trim(),
+    );
+    if (notice) {
+      logAI(`WITHDRAW_NOTICE deterministic reply kb=${notice.id} user="${userMessage.slice(0, 50)}"`);
+      return { reply: notice.answer.trim(), shouldHandoff: false, knowledgeId: notice.id };
+    }
+  }
 
   // ─ Default system prompt ─
   const basePrompt = (botConfig?.systemPrompt || '').trim();
